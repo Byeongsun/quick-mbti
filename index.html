@@ -30,9 +30,11 @@
 </head>
 <body>
   <h1>Quick-MBTI : 빠르게 MBTI를 알려줍니다</h1>
+
   <form id="form"><!-- JS가 data/*.json을 불러와 문항을 렌더링합니다 --></form>
   <section id="result" aria-live="polite"></section>
 
-  <script src="js/app.js" defer></script>
+  <!-- 🔧 캐시 버스터 쿼리 추가: 브라우저/Pages 캐시 무시 -->
+  <script src="js/app.js?v=20250816" defer></script>
 </body>
 </html>
