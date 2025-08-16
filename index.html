@@ -1,42 +1,23 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Quick-MBTI : 빠르게 MBTI를 알려줍니다</title>
-<meta name="description" content="8문항 스토리형 MBTI · 동률 시 추가 문항 자동 출제(0~8개) · 보고서 한 페이지 결과" />
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
-<meta name="theme-color" content="#111827">
-<style>
-  :root{--ink:#111827;--border:#e5e7eb;--muted:#6b7280;--ok:#047857;--warn:#b45309}
-  *{box-sizing:border-box}
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.58;margin:16px;color:#111827;background:#f8fafc}
-  h1{font-size:1.34rem;margin:0 0 10px}
-  .q{border:1px solid var(--border);border-radius:12px;padding:12px;margin:12px 0;background:#fff}
-  .q h3{margin:0 0 10px;font-size:1rem}
-  .opts{display:flex;gap:16px;flex-wrap:wrap}
-  label{display:flex;align-items:flex-start;gap:8px;cursor:pointer;max-width:820px}
-  input[type="radio"]{margin-top:3px}
-  .req{color:#b91c1c;font-size:.9rem;display:none;margin-top:6px}
-  .hint{font-size:.9rem;color:#6b7280;margin-top:6px;max-width:820px}
-  #result{margin-top:22px;border-top:2px solid var(--border);padding-top:14px;display:none}
-  .row{display:flex;flex-wrap:wrap;gap:12px}
-  .card{border:1px solid var(--border);border-radius:12px;padding:12px;min-width:300px;background:#fff;flex:1}
-  .small{font-size:.92rem;color:#374151}
-  .muted{color:var(--muted)}
-  .ok{color:var(--ok)}.warn{color:var(--warn)}.low{color:#6b7280}
-  .table{width:100%;border-collapse:collapse;margin-top:8px}
-  .table th,.table td{border:1px solid var(--border);padding:6px 8px;text-align:center}
-  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-  .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:10px}
-</style>
+  <meta charset="UTF-8">
+  <title>Quick-MBTI : 빠르게 MBTI를 알려줍니다</title>
+  <style>
+    body { font-family: sans-serif; margin:20px; background:#fafafa; }
+    #form, #result { max-width:800px; margin:auto; }
+    .q { background:#fff; padding:12px; margin-bottom:10px; border:1px solid #ddd; border-radius:6px; }
+    button { margin:6px 0; padding:6px 12px; cursor:pointer; }
+    #result pre { background:#fff; border:1px solid #ccc; padding:16px; white-space:pre-wrap; }
+    #debug-panel { font-size:0.9em; color:#555; margin-top:20px; display:none; }
+  </style>
 </head>
 <body>
-<h1>Quick-MBTI : 빠르게 MBTI를 알려줍니다</h1>
+  <h2>Quick-MBTI : 빠르게 MBTI를 알려줍니다</h2>
+  <div id="form"></div>
+  <div id="result"></div>
+  <div id="debug-panel"></div>
 
-<form id="form"><!-- JS가 data/*.json을 불러와 문항을 렌더링합니다 --></form>
-<section id="result" aria-live="polite"></section>
-
-<script src="js/app.js" defer></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
