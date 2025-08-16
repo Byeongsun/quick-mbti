@@ -7,26 +7,9 @@ const DATA_URLS = {
 const AXES = ['EI','SN','TF','JP'];
 const MAX_TB = 2;   // 축별 추가문항 최대(0~2)
 
-// 🔧 DEBUG: 기본 OFF. ?debug=1 또는 localStorage=1 일 때만 ON
-//const DEBUG = (() => {
-//  const q = new URLSearchParams(location.search).get('debug');
-//  if (q === '1') return true;    // 쿼리로 강제 ON
-//  if (q === '0') return false;   // 쿼리로 강제 OFF
-//  return localStorage.getItem('quick_mbti_debug') === '1'; // 저장소 플래그
-//})();
-
-DEBUG = 0;
-
-// // 혹시 예전 캐시에서 뜬 디버그 패널이 남아있으면 제거
-// if (!DEBUG) {
-//   document.getElementById('debug-panel')?.remove();
-//   document.getElementById('debug-toggle')?.remove();
-// }
-
 // ========== DOM utils ==========
 const $ = s => document.querySelector(s);
 function scrollToEl(el){ try{ el?.scrollIntoView({behavior:'smooth', block:'center'});}catch{} }
-function log(...a){ if (DEBUG) console.debug('[quick-mbti]', ...a); }
 
 // ========== State ==========
 let KB = { questions:null, tiebreakers:null };
@@ -37,58 +20,6 @@ let answers = [];
 let askedTB = {EI:0,SN:0,TF:0,JP:0};
 let baseDone = false;
 let pendingTBIds = [];
-
-// ========== Debug Panel (기본 숨김) ==========
-// function ensureDebugShell(){
-//   if(!DEBUG) return;
-//   if(!document.body){ document.addEventListener('DOMContentLoaded', ensureDebugShell, {once:true}); return; }
-//   if($('#debug-panel')) return;
-
-//   const style = document.createElement('style');
-//   style.textContent = `
-//     #debug-panel{position:fixed;right:12px;bottom:12px;z-index:9999;background:#0f172a;color:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:360px;font:12px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-//     #debug-panel summary{cursor:pointer;list-style:none;padding:10px 12px;margin:0}
-//     #debug-panel details[open] summary{border-bottom:1px solid rgba(255,255,255,.15)}
-//     #debug-panel .body{padding:10px 12px}
-//     #debug-panel table{width:100%;border-collapse:collapse;margin-top:6px}
-//     #debug-panel th,#debug-panel td{border:1px solid rgba(255,255,255,.15);padding:4px 6px;text-align:center}
-//     #debug-panel .row{display:flex;gap:8px;flex-wrap:wrap}
-//     #debug-panel .tag{display:inline-block;border:1px solid rgba(255,255,255,.25);padding:2px 6px;border-radius:999px}
-//   `;
-//   document.head.appendChild(style);
-
-//   const box = document.createElement('div');
-//   box.id = 'debug-panel';
-//   box.innerHTML = `
-//     <details open>
-//       <summary>🛠 Debug (실시간 합계)</summary>
-//       <div class="body" id="debug-body">로드 중...</div>
-//     </details>`;
-//   document.body.appendChild(box);
-// }
-// function renderDebug(model){
-//   if(!DEBUG) return;
-//   ensureDebugShell();
-//   const baseCount = countBaseAnswered();
-//   const pendCount = pendingTBIds.filter(id => !isAnswered(id)).length;
-//   const rows = `
-//     <tr><th>축</th><th>득점</th><th>문항수</th><th>우세/동률</th></tr>
-//     <tr><td>E vs I</td><td>${model.count.E} : ${model.count.I}</td><td>${model.axisTotals.EI}</td><td>${model.count.E>model.count.I?'E':model.count.E<model.count.I?'I':'동률'}</td></tr>
-//     <tr><td>S vs N</td><td>${model.count.S} : ${model.count.N}</td><td>${model.axisTotals.SN}</td><td>${model.count.S>model.count.N?'S':model.count.S<model.count.N?'N':'동률'}</td></tr>
-//     <tr><td>T vs F</td><td>${model.count.T} : ${model.count.F}</td><td>${model.axisTotals.TF}</td><td>${model.count.T>model.count.F?'T':model.count.T<model.count.F?'F':'동률'}</td></tr>
-//     <tr><td>J vs P</td><td>${model.count.J} : ${model.count.P}</td><td>${model.axisTotals.JP}</td><td>${model.count.J>model.count.P?'J':model.count.J<model.count.P?'P':'동률'}</td></tr>
-//   `;
-//   const tag = (k,v)=>`<span class="tag">${k}: ${v}</span>`;
-//   $('#debug-body').innerHTML = `
-//     <table>${rows}</table>
-//     <div class="row" style="margin-top:6px">
-//       ${tag('기본응답', `${baseCount}/8`)} ${tag('baseDone', baseDone)}
-//       ${tag('대기TB', pendCount)} ${tag('EI TB', askedTB.EI)}
-//       ${tag('SN TB', askedTB.SN)} ${tag('TF TB', askedTB.TF)} ${tag('JP TB', askedTB.JP)}
-//       ${tag('신뢰도', `${model.reliability}%`)}
-//     </div>
-//     <div class="muted" style="opacity:.7;margin-top:4px">※ 대기TB>0이면 결과 렌더 보류</div>`;
-// }
 
 // ========== Fetch ==========
 async function loadData(){
@@ -258,13 +189,13 @@ function onAnyChange(e){
   collectAnswers();
 
   if(!baseDone){
-    if(countBaseAnswered() < 8) return;
+    if(countBaseAnswered() < 8) return; // 8개 모두 응답 전이면 대기
     baseDone = true;
     evaluateOrAsk();
     return;
   }
   const changed = e?.target?.name || '';
-  if(/^tb_/.test(changed)){
+  if(/^tb_/.test(changed)){ // 추가문항 응답 시 평가
     evaluateOrAsk();
   }
 }
@@ -297,7 +228,7 @@ function evaluateOrAsk(){
       if(appendTB(axis)) added++;
     }
   }
-  if(added>0) return;            // 응답 대기
+  if(added>0) return;            // 방금 추가했으면 응답 대기
 
   // 추가문항 대기 중이면 결과 보류
   if(!allPendingAnswered()) return;
@@ -316,7 +247,6 @@ function evaluateOrAsk(){
 }
 
 // ========== Boot ==========
-//if (DEBUG) ensureDebugShell();  // 기본 OFF이므로 대부분 실행 안 됨
 document.addEventListener('DOMContentLoaded', ()=>{
   loadData().then(()=>{
     askedTB={EI:0,SN:0,TF:0,JP:0};
