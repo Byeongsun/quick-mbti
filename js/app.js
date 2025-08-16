@@ -316,7 +316,7 @@ function evaluateOrAsk(){
 }
 
 // ========== Boot ==========
-if (DEBUG) ensureDebugShell();  // 기본 OFF이므로 대부분 실행 안 됨
+//if (DEBUG) ensureDebugShell();  // 기본 OFF이므로 대부분 실행 안 됨
 document.addEventListener('DOMContentLoaded', ()=>{
   loadData().then(()=>{
     askedTB={EI:0,SN:0,TF:0,JP:0};
