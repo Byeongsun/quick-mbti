@@ -111,11 +111,8 @@ function computeMBTI(ans){
   const pick=(a,b,def)=> count[a]>count[b]?a:count[a]<count[b]?b:def;
   const ei=pick('E','I','E'), sn=pick('S','N','S'), tf=pick('T','F','T'), jp=pick('J','P','J');
   const mbti=ei+sn+tf+jp;
-  const total=ans.length||1;
-  const diff=Math.abs(count.E-count.I)+Math.abs(count.S-count.N)+Math.abs(count.T-count.F)+Math.abs(count.J-count.P);
-  const reliability=Math.round((diff/total)*100);
   const ties={ EI:count.E===count.I, SN:count.S===count.N, TF:count.T===count.F, JP:count.J===count.P };
-  return {mbti,count,axisTotals,reliability,total,ties};
+  return {mbti,count,axisTotals:axisTotals,ties};
 }
 function hasPendingForAxis(axis){
   return pendingTBIds.some(id=>id.startsWith(`tb_${axis}_`) && !isAnswered(id));
@@ -130,10 +127,13 @@ function tieAxesToAsk(model){
 }
 
 // ========== 결과(텍스트 보고서) ==========
-const TYPE_DOMAINS={};
-function setExplain(type, life, work, rel, study){ TYPE_DOMAINS[type]={life,work,rel,study}; }
-setExplain('ISTJ',{tips:'생활: 루틴/예산 점검, 비상 계획 정기 갱신.'},{tips:'일: 역할·마감 합의 기록, 점검 목록으로 품질 안정.'},{tips:'인간관계: 약속·기대 분명히, 사실 기반 조정.'},{tips:'학습: 주간 계획과 복습 고정으로 축적.'});
-setExplain('ENFP',{tips:'생활: 동시 과제 수 제한으로 에너지 분산 방지.'},{tips:'일: 아이디어 전개 후 범위 합의로 마무리 밀어붙이기.'},{tips:'인간관계: 경계와 휴식시간 확보.'},{tips:'학습: 흥미 유발, 점검 파트너로 완료율 관리.'});
+// 공통 팁(모든 유형 동일)
+const COMMON_TIPS = {
+  life:  "생활: 에너지 패턴을 이해하고 휴식 규칙을 마련하세요.",
+  work:  "일: 강점 역할을 명확히 하고 협업 방식을 합의하세요.",
+  rel:   "인간관계: 기대·경계를 공유하고 피드백을 정례화하세요.",
+  study: "학습: 목표를 단계로 나눠 진행률을 가시화하세요."
+};
 
 function ensureReportStyles(){
   if($('#capture-style')) return;
@@ -150,35 +150,32 @@ function renderResult(model, unresolvedAxes=[]){
   // 결과만 남김(문항 제거)
   const form=$('#form'); if(form) form.innerHTML='';
 
-  const {mbti,reliability}=model;
-  const tips = TYPE_DOMAINS[mbti] || {
-    life:{tips:'생활: 에너지 패턴을 이해하고 휴식 규칙을 마련하세요.'},
-    work:{tips:'일: 강점 역할을 명확히 하고 협업 방식을 합의하세요.'},
-    rel:{tips:'인간관계: 기대·경계를 공유하고 피드백을 정례화하세요.'},
-    study:{tips:'학습: 목표를 단계로 나눠 진행률을 가시화하세요.'}
-  };
+  const {mbti}=model;
   const unresolved = unresolvedAxes.length ? ` (동률 유지: ${unresolvedAxes.join(', ')})` : '';
 
   $('#result').innerHTML = `
 <pre>
 [결과]
-${mbti}   신뢰도: ${reliability}%${unresolved}
+<span style="font-size:1.6rem; font-weight:bold;">${mbti}</span>${unresolved}
 
 [팁]
-- 생활
-${tips.life.tips}
-- 일
-${tips.work.tips}
-- 인간관계
-${tips.rel.tips}
-- 학습
-${tips.study.tips}
+${COMMON_TIPS.life}
+${COMMON_TIPS.work}
+${COMMON_TIPS.rel}
+${COMMON_TIPS.study}
 
 [MBTI 의미]
-E                           I
-S                           N
-T                           F
-J                           P
+E (Extraversion, 외향): 사람들과의 교류에서 에너지를 얻고, 활동적이며 즉각적인 행동을 선호함
+I (Introversion, 내향): 혼자 있는 시간을 통해 회복하고, 깊이 있는 사고와 내적 성찰을 선호함
+
+S (Sensing, 감각): 현재의 구체적 사실과 경험을 중시하며, 실제적이고 현실적인 정보를 신뢰함
+N (Intuition, 직관): 보이지 않는 가능성과 패턴을 중시하며, 미래지향적이고 상상력 있는 사고를 선호함
+
+T (Thinking, 사고): 논리와 객관적 분석을 통해 결정을 내리며, 공정성과 일관성을 중시함
+F (Feeling, 감정): 사람과 관계의 조화를 중시하며, 공감과 가치에 기반해 결정을 내림
+
+J (Judging, 판단): 계획적이고 체계적으로 삶을 조직하며, 마감과 규칙을 선호함
+P (Perceiving, 인식): 유연하고 상황에 맞게 적응하며, 자율성과 개방성을 중시함
 </pre>`;
   $('#result').style.display='block';
   scrollToEl($('#result'));
