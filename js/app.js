@@ -8,12 +8,14 @@ const AXES = ['EI','SN','TF','JP'];
 const MAX_TB = 2;   // 축별 추가문항 최대(0~2)
 
 // 🔧 DEBUG: 기본 OFF. ?debug=1 또는 localStorage=1 일 때만 ON
-const DEBUG = (() => {
-  const q = new URLSearchParams(location.search).get('debug');
-  if (q === '1') return true;    // 쿼리로 강제 ON
-  if (q === '0') return false;   // 쿼리로 강제 OFF
-  return localStorage.getItem('quick_mbti_debug') === '1'; // 저장소 플래그
-})();
+//const DEBUG = (() => {
+//  const q = new URLSearchParams(location.search).get('debug');
+//  if (q === '1') return true;    // 쿼리로 강제 ON
+//  if (q === '0') return false;   // 쿼리로 강제 OFF
+//  return localStorage.getItem('quick_mbti_debug') === '1'; // 저장소 플래그
+//})();
+
+DEBUG = 0;
 
 // 혹시 예전 캐시에서 뜬 디버그 패널이 남아있으면 제거
 if (!DEBUG) {
