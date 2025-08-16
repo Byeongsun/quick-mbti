@@ -1,23 +1,38 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Quick-MBTI : 빠르게 MBTI를 알려줍니다</title>
+  <meta name="description" content="8문항 스토리형 MBTI · 동률 시 추가 문항 자동 출제(0~8개) · 보고서 한 페이지 결과" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <style>
-    body { font-family: sans-serif; margin:20px; background:#fafafa; }
-    #form, #result { max-width:800px; margin:auto; }
-    .q { background:#fff; padding:12px; margin-bottom:10px; border:1px solid #ddd; border-radius:6px; }
-    button { margin:6px 0; padding:6px 12px; cursor:pointer; }
-    #result pre { background:#fff; border:1px solid #ccc; padding:16px; white-space:pre-wrap; }
-    #debug-panel { font-size:0.9em; color:#555; margin-top:20px; display:none; }
+    :root{--ink:#111827;--border:#e5e7eb;--muted:#6b7280;}
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.58;margin:16px;color:#111827;background:#f8fafc}
+    h1{font-size:1.2rem;margin:0 0 12px}
+    .q{border:1px solid var(--border);border-radius:10px;padding:12px;margin:12px 0;background:#fff}
+    .q h3{margin:0 0 8px;font-size:1rem}
+    .opts{display:flex;gap:12px;flex-wrap:wrap}
+    label{display:flex;align-items:flex-start;gap:8px;cursor:pointer;max-width:820px}
+    input[type="radio"]{margin-top:3px}
+    .req{color:#b91c1c;font-size:.9rem;display:none;margin-top:6px}
+    .hint{font-size:.9rem;color:#6b7280;margin-top:6px;max-width:820px}
+    #result{margin-top:18px}
+    /* 캡처/인쇄용 */
+    #result pre{background:#fff;border:1px solid var(--border);padding:16px;border-radius:10px;white-space:pre-wrap;line-height:1.55}
+    @media print{
+      #form,.q,.hint,.req{display:none !important}
+      body{background:#fff}
+      #result pre{border:0;border-radius:0}
+    }
   </style>
 </head>
 <body>
-  <h2>Quick-MBTI : 빠르게 MBTI를 알려줍니다</h2>
-  <div id="form"></div>
-  <div id="result"></div>
-  <div id="debug-panel"></div>
+  <h1>Quick-MBTI : 빠르게 MBTI를 알려줍니다</h1>
+  <form id="form"><!-- JS가 data/*.json을 불러와 문항을 렌더링합니다 --></form>
+  <section id="result" aria-live="polite"></section>
 
-  <script src="js/app.js"></script>
+  <script src="js/app.js" defer></script>
 </body>
 </html>
