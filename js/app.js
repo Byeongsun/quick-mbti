@@ -1,10 +1,10 @@
 // ========== Config ==========
 const DATA_URLS = {
-  questions: 'data/questions.json',
-  tiebreakers: 'data/tiebreakers.json'
+  questions: 'data/questions.json',      // 축별 문제은행(EI/SN/TF/JP)
+  tiebreakers: 'data/tiebreakers.json'   // 축별 타이브레이커
 };
 const AXES = ['EI','SN','TF','JP'];
-const MAX_TB = 2;
+const MAX_TB = 2; // 축별 추가문항 최대(0~2) → 전체 최대 8개
 
 // 디버그 패널 (주소에 ?debug=0 붙이면 OFF)
 const DEBUG = (new URLSearchParams(location.search).get('debug') ?? '1') !== '0' ||
@@ -17,19 +17,20 @@ function status(msg){ console.debug('[quick-mbti]', msg); }
 
 // ========== State ==========
 let KB = { questions:null, tiebreakers:null };
-let baseQuestions = [];
-let baseIds = [];
+let baseQuestions = [];                   // [{id,axis,prompt,A,B,hint}]
+let baseIds = [];                         // ['base_EI_1',...]
 let usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
-let answers = [];
-let askedTB = {EI:0,SN:0,TF:0,JP:0};
-let baseDone = false;
-let pendingTBIds = [];
+let answers = [];                         // 전체 선택(E/I/S/N/T/F/J/P)
+let askedTB = {EI:0,SN:0,TF:0,JP:0};     // 축별 추가문항 제공 횟수
+let baseDone = false;                     // 기본 8문항 완료 여부
+let pendingTBIds = [];                    // 아직 답하지 않은 추가문항 name 목록
 
-// ========== Debug UI (생략 없이 동작 동일) ==========
+// ========== Debug UI ==========
 function ensureDebugShell(){
   if(!DEBUG) return;
   if(!document.body){ document.addEventListener('DOMContentLoaded', ensureDebugShell, {once:true}); return; }
   if($('#debug-panel')) return;
+
   const css = document.createElement('style');
   css.textContent = `
     #debug-panel{position:fixed;right:12px;bottom:12px;z-index:9999;background:#111827;color:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:360px;font:12px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
@@ -42,6 +43,7 @@ function ensureDebugShell(){
     #debug-toggle{position:fixed;right:12px;bottom:12px;z-index:10000;border-radius:999px;border:1px solid #d1d5db;background:#fff;padding:8px 10px;cursor:pointer;font-size:14px;box-shadow:0 6px 14px rgba(0,0,0,.15)}
   `;
   document.head.appendChild(css);
+
   const box = document.createElement('div');
   box.id = 'debug-panel';
   box.innerHTML = `
@@ -50,12 +52,16 @@ function ensureDebugShell(){
       <div class="body" id="debug-body">
         <div class="muted">응답에 따라 즉시 업데이트됩니다.</div>
       </div>
-    </details>`;
+    </details>
+  `;
   document.body.appendChild(box);
+
   if(!$('#debug-toggle')){
     const btn=document.createElement('button');
     btn.id='debug-toggle'; btn.type='button'; btn.textContent='🛠';
-    btn.addEventListener('click', ()=>{ const det=$('#debug-panel details'); det.open=!det.open; });
+    btn.addEventListener('click', ()=>{
+      const det=$('#debug-panel details'); det.open=!det.open;
+    });
     document.body.appendChild(btn);
   }
 }
@@ -199,7 +205,7 @@ function nextTieAxisOrder(model){
   return res;
 }
 
-// ========== Result UI: 캡처 친화 원페이지 ==========
+// ========== Result UI: 보고서 한 페이지 & 결과 시 문항 제거 ==========
 const AXIS_MEANING_LONG = {
   E:{name:'Extraversion · 외향', text:'에너지를 외부 상호작용에서 얻는 경향. 말하면서 생각을 정리하고 즉시 실행을 선호.'},
   I:{name:'Introversion · 내향', text:'에너지를 고요/몰입에서 얻는 경향. 먼저 정리하고 말하며, 깊이 파고드는 편.'},
@@ -228,14 +234,33 @@ function ensureCaptureStyles(){
   if($('#capture-style')) return;
   const css=document.createElement('style'); css.id='capture-style';
   css.textContent = `
-    #result .stack{display:flex;flex-direction:column;gap:12px}
-    #result .card{page-break-inside:avoid}
+    /* 보고서 컨테이너 */
+    #report-wrap{max-width:880px;margin:0 auto;padding:16px}
+    #report-title{font-size:1.4rem;margin:0 0 12px}
+    #report-meta{color:#6b7280;font-size:.92rem;margin-bottom:12px}
+
+    /* 카드/표 스타일 */
+    #result .stack{display:flex;flex-direction:column;gap:14px}
+    #result .card{border:1px solid #e5e7eb;border-radius:12px;padding:14px;background:#fff;page-break-inside:avoid}
+    #result .section-title{margin:0 0 8px;font-size:1.05rem}
+    #result .kv{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    #result .badge{display:inline-block;border:1px solid #e5e7eb;border-radius:999px;padding:2px 8px;font-size:.9rem;color:#374151;background:#f9fafb}
+    #result .tip-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+    #result .tip{border:1px dashed #e5e7eb;border-radius:10px;padding:10px;background:#fafafa}
+    #result .tip strong{display:block;margin-bottom:6px}
+
+    /* 표 */
+    #result .table{width:100%;border-collapse:collapse}
+    #result .table th,#result .table td{border:1px solid #e5e7eb;padding:6px 8px;text-align:center}
+    #result .table thead th{background:#f9fafb}
+
+    /* 인쇄/캡처 최적화 */
     @media print {
       body{background:#fff}
       #debug-panel,#debug-toggle{display:none !important}
-      .q,.hint,.req{display:none !important}
-      #form{display:none !important}
+      #form,.q,.hint,.req{display:none !important}
       #result{border-top:none;padding-top:0;margin-top:0}
+      .card{box-shadow:none}
     }
   `;
   document.head.appendChild(css);
@@ -243,59 +268,83 @@ function ensureCaptureStyles(){
 
 function renderResult(model, unresolvedAxes=[]){
   ensureCaptureStyles();
-  const root=$('#result'); root.innerHTML='';
+
+  // ✨ 결과 시점에 문항을 지우고 결과만 남깁니다.
+  const form = $('#form');
+  if(form){ form.innerHTML = ''; }
+
+  const root = $('#result');
+  root.innerHTML = '';
+
   const {mbti,count,axisTotals,reliability,total}=model;
-  const dom = TYPE_DOMAINS[mbti] || {life:{tips:'생활: 루틴 최적화/휴식 규칙.'},work:{tips:'일: 역할/마감 합의, 협업 합의.'},rel:{tips:'인간관계: 기대/경계 공유.'},study:{tips:'학습: 단계 분해/진행률 가시화.'}};
-  const badges = unresolvedAxes.length ? `<span class="muted small">동률 유지: ${unresolvedAxes.join(', ')}</span>` : '';
+  const dom = TYPE_DOMAINS[mbti] || {
+    life:{tips:'생활: 루틴 최적화/휴식 규칙.'},
+    work:{tips:'일: 역할/마감 합의, 협업 합의.'},
+    rel:{tips:'인간관계: 기대/경계 공유.'},
+    study:{tips:'학습: 단계 분해/진행률 가시화.'}
+  };
+  const badges = unresolvedAxes.length ? `<span class="badge">동률 유지: ${unresolvedAxes.join(', ')}</span>` : '';
 
   const legend = `
     <div class="legend small">
       ${Object.entries(AXIS_MEANING_LONG).map(([k,v])=>(
-        `<div><strong>${k}</strong> — ${v.name}<br/><span class="muted">${v.text}</span></div>`
+        `<div class="tip"><strong>${k} — ${v.name}</strong><div class="muted">${v.text}</div></div>`
       )).join('')}
     </div>`;
 
-  // ▶ 캡처 친화: 탭 제거, 4도메인 모두 표시(한 페이지)
-  root.innerHTML=`
-    <h2 style="margin-bottom:6px">결과: <span class="mono">${mbti}</span> ${badges}</h2>
-    <div class="stack">
-      <div class="card">
-        <div><strong>신뢰도</strong>:
-          <span class="${reliability>=70?'ok':(reliability>=40?'warn':'low')}">${reliability}%</span>
-          <span class="muted small">(응답 수 ${total} 정규화 · 축별 격차 기반)</span>
+  // 📄 보고서 래퍼 (날짜 표기)
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth()+1).padStart(2,'0');
+  const dd = String(now.getDate()).padStart(2,'0');
+
+  root.innerHTML = `
+    <div id="report-wrap">
+      <h2 id="report-title">Quick-MBTI 결과 보고서</h2>
+      <div id="report-meta">생성일: ${yyyy}-${mm}-${dd}</div>
+
+      <div class="stack">
+        <!-- (1) 결과 -->
+        <div class="card">
+          <div class="section-title">① 결과</div>
+          <div class="kv">
+            <div><strong>결과:</strong> <span class="mono" style="font-size:1.2rem">${mbti}</span></div>
+            <div class="badge">신뢰도 ${reliability}%</div>
+            ${badges}
+          </div>
+          <table class="table small" style="margin-top:10px">
+            <thead><tr><th>축</th><th>득점</th><th>문항수</th><th>우세</th></tr></thead>
+            <tbody>
+              <tr><td>E vs I</td><td>${count.E} : ${count.I}</td><td>${axisTotals.EI}</td><td>${count.E>=count.I?'E':'I'}</td></tr>
+              <tr><td>S vs N</td><td>${count.S} : ${count.N}</td><td>${axisTotals.SN}</td><td>${count.S>=count.N?'S':'N'}</td></tr>
+              <tr><td>T vs F</td><td>${count.T} : ${count.F}</td><td>${axisTotals.TF}</td><td>${count.T>=count.F?'T':'F'}</td></tr>
+              <tr><td>J vs P</td><td>${count.J} : ${count.P}</td><td>${axisTotals.JP}</td><td>${count.J>=count.P?'J':'P'}</td></tr>
+            </tbody>
+          </table>
         </div>
-        <table class="table small" style="margin-top:8px">
-          <thead><tr><th>축</th><th>득점</th><th>문항수</th><th>우세</th></tr></thead>
-          <tbody>
-            <tr><td>E vs I</td><td>${count.E} : ${count.I}</td><td>${axisTotals.EI}</td><td>${count.E>=count.I?'E':'I'}</td></tr>
-            <tr><td>S vs N</td><td>${count.S} : ${count.N}</td><td>${axisTotals.SN}</td><td>${count.S>=count.N?'S':'N'}</td></tr>
-            <tr><td>T vs F</td><td>${count.T} : ${count.F}</td><td>${axisTotals.TF}</td><td>${count.T>=count.F?'T':'F'}</td></tr>
-            <tr><td>J vs P</td><td>${count.J} : ${count.P}</td><td>${axisTotals.JP}</td><td>${count.J>=count.P?'J':'P'}</td></tr>
-          </tbody>
-        </table>
-      </div>
 
-      <div class="card small">
-        <strong>생활</strong><br/>${dom.life.tips}
-      </div>
-      <div class="card small">
-        <strong>일(업무)</strong><br/>${dom.work.tips}
-      </div>
-      <div class="card small">
-        <strong>인간관계</strong><br/>${dom.rel.tips}
-      </div>
-      <div class="card small">
-        <strong>학습</strong><br/>${dom.study.tips}
-      </div>
+        <!-- (2) 팁: 생활/일/인간관계/학습 (모두 노출) -->
+        <div class="card">
+          <div class="section-title">② 팁</div>
+          <div class="tip-grid">
+            <div class="tip"><strong>생활</strong>${dom.life.tips}</div>
+            <div class="tip"><strong>일(업무)</strong>${dom.work.tips}</div>
+            <div class="tip"><strong>인간관계</strong>${dom.rel.tips}</div>
+            <div class="tip"><strong>학습</strong>${dom.study.tips}</div>
+          </div>
+        </div>
 
-      <div class="card">
-        <h3 style="margin:6px 0">MBTI 축 의미(확장)</h3>
-        ${legend}
+        <!-- (3) MBTI 의미 (확장 설명) -->
+        <div class="card">
+          <div class="section-title">③ MBTI 의미</div>
+          ${legend}
+        </div>
       </div>
     </div>
   `;
-  $('#result').style.display='block';
-  scrollToEl($('#result'));
+
+  root.style.display = 'block';
+  scrollToEl(root);
 }
 
 // ========== Flow ==========
