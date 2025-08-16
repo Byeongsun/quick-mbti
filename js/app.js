@@ -144,19 +144,18 @@ function ensureReportStyles(){
   `;
   document.head.appendChild(css);
 }
-function renderResult(model, unresolvedAxes=[]){
+function renderResult(model){
   ensureReportStyles();
 
   // 결과만 남김(문항 제거)
   const form=$('#form'); if(form) form.innerHTML='';
 
   const {mbti}=model;
-  const unresolved = unresolvedAxes.length ? ` (동률 유지: ${unresolvedAxes.join(', ')})` : '';
 
   $('#result').innerHTML = `
 <pre>
 [결과]
-<span style="font-size:1.6rem; font-weight:bold;">${mbti}</span>${unresolved}
+<span style="font-size:1.8rem;font-weight:800;">${mbti}</span>
 
 [팁]
 ${COMMON_TIPS.life}
@@ -165,17 +164,17 @@ ${COMMON_TIPS.rel}
 ${COMMON_TIPS.study}
 
 [MBTI 의미]
-E (Extraversion, 외향): 사람들과의 교류에서 에너지를 얻고, 활동적이며 즉각적인 행동을 선호함
-I (Introversion, 내향): 혼자 있는 시간을 통해 회복하고, 깊이 있는 사고와 내적 성찰을 선호함
+E (Extraversion, 외향): 사람들과의 교류·활동에서 에너지를 얻고, 외부 자극에 적극적으로 반응함
+I (Introversion, 내향): 고요한 시간과 혼자만의 몰입에서 에너지를 회복하고, 신중한 내적 성찰을 선호함
 
-S (Sensing, 감각): 현재의 구체적 사실과 경험을 중시하며, 실제적이고 현실적인 정보를 신뢰함
-N (Intuition, 직관): 보이지 않는 가능성과 패턴을 중시하며, 미래지향적이고 상상력 있는 사고를 선호함
+S (Sensing, 감각): 현재의 구체적 사실·경험을 중시하고, 실용적이고 현실적인 정보에 신뢰를 둠
+N (Intuition, 직관): 패턴·가능성과 같은 추상적 연결을 중시하고, 미래지향적 아이디어를 선호함
 
-T (Thinking, 사고): 논리와 객관적 분석을 통해 결정을 내리며, 공정성과 일관성을 중시함
-F (Feeling, 감정): 사람과 관계의 조화를 중시하며, 공감과 가치에 기반해 결정을 내림
+T (Thinking, 사고): 논리·일관성·원칙에 따라 판단하고, 공정한 기준을 우선함
+F (Feeling, 감정): 사람·가치·관계의 조화를 중시하고, 공감과 배려를 판단에 반영함
 
-J (Judging, 판단): 계획적이고 체계적으로 삶을 조직하며, 마감과 규칙을 선호함
-P (Perceiving, 인식): 유연하고 상황에 맞게 적응하며, 자율성과 개방성을 중시함
+J (Judging, 판단): 계획적·체계적으로 일을 정리하고, 마감과 규칙을 선호함
+P (Perceiving, 인식): 상황에 맞춰 유연하게 적응하고, 열린 선택지를 유지하는 것을 선호함
 </pre>`;
   $('#result').style.display='block';
   scrollToEl($('#result'));
@@ -230,17 +229,8 @@ function evaluateOrAsk(){
   // 추가문항 대기 중이면 결과 보류
   if(!allPendingAnswered()) return;
 
-  // 재평가
-  const latest = computeMBTI(answers);
-
-  // 여전히 동률인데 더 이상 물을 수 없거나(한도 도달/풀 없음) → 결과
-  const unresolved=[];
-  if(latest.ties.EI && askedTB.EI>=MAX_TB) unresolved.push('EI');
-  if(latest.ties.SN && askedTB.SN>=MAX_TB) unresolved.push('SN');
-  if(latest.ties.TF && askedTB.TF>=MAX_TB) unresolved.push('TF');
-  if(latest.ties.JP && askedTB.JP>=MAX_TB) unresolved.push('JP');
-
-  renderResult(latest, unresolved);
+  // 재평가 후 결과 즉시 출력
+  renderResult(computeMBTI(answers));
 }
 
 // ========== Boot ==========
