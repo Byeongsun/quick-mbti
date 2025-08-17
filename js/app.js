@@ -1,17 +1,26 @@
 // ========== Config ==========
-const VER = '20250816';
-const DATA_URLS = {
-  questions: `data/questions.json?v=${VER}`,
-  tiebreakers: `data/tiebreakers.json?v=${VER}`
-};
+const VER = '2025-08-17';
 const AXES = ['EI','SN','TF','JP'];
 const MAX_TB = 2;   // 축별 추가문항 최대(0~2)
+
+// 모드별 데이터 URL
+const DATA_URLS = {
+  normal: {
+    questions: `data/questions.json?v=${VER}`,
+    tiebreakers: `data/tiebreakers.json?v=${VER}`
+  },
+  senior: {
+    questions: `data/questions_senior.json?v=${VER}`,
+    tiebreakers: `data/tiebreakers_senior.json?v=${VER}`
+  }
+};
 
 // ========== DOM utils ==========
 const $ = s => document.querySelector(s);
 function scrollToEl(el){ try{ el?.scrollIntoView({behavior:'smooth', block:'center'});}catch{} }
 
 // ========== State ==========
+let mode = null; // 'normal' | 'senior'
 let KB = { questions:null, tiebreakers:null };
 let baseQuestions = [];
 let baseIds = [];
@@ -23,14 +32,15 @@ let pendingTBIds = [];
 
 // ========== Fetch ==========
 async function loadData(){
+  const urls = DATA_URLS[mode];
   const [qRes, tbRes] = await Promise.all([
-    fetch(DATA_URLS.questions, {cache:'no-store'}),
-    fetch(DATA_URLS.tiebreakers, {cache:'no-store'})
+    fetch(urls.questions, {cache:'no-store'}),
+    fetch(urls.tiebreakers, {cache:'no-store'})
   ]);
-  if(!qRes.ok) throw new Error('questions.json 로드 실패: '+qRes.status);
-  if(!tbRes.ok) throw new Error('tiebreakers.json 로드 실패: '+tbRes.status);
-  KB.questions = await qRes.json();
-  KB.tiebreakers = await tbRes.json();
+  if(!qRes.ok) throw new Error('questions 로드 실패: '+qRes.status);
+  if(!tbRes.ok) throw new Error('tiebreakers 로드 실패: '+tbRes.status);
+  KB.questions = await qRes.json();      // {EI:[],SN:[],TF:[],JP:[]}
+  KB.tiebreakers = await tbRes.json();   // {EI:[],SN:[],TF:[],JP:[]}
 }
 
 // ========== Question pickers ==========
@@ -127,7 +137,7 @@ function tieAxesToAsk(model){
 }
 
 // ========== 결과(텍스트 보고서) ==========
-// 공통 팁(모든 유형 동일)
+// 공통 팁(4줄 고정)
 const COMMON_TIPS = {
   life:  "생활: 에너지 패턴을 이해하고 휴식 규칙을 마련하세요.",
   work:  "일: 강점 역할을 명확히 하고 협업 방식을 합의하세요.",
@@ -140,14 +150,13 @@ function ensureReportStyles(){
   const css=document.createElement('style'); css.id='capture-style';
   css.textContent = `
     #result pre{background:#fff;border:1px solid #e5e7eb;padding:16px;border-radius:10px;white-space:pre-wrap;line-height:1.55}
+    #result strong.type{font-size:1.8rem;font-weight:800}
     @media print{ #form{display:none!important} body{background:#fff} }
   `;
   document.head.appendChild(css);
 }
 function renderResult(model){
   ensureReportStyles();
-
-  // 결과만 남김(문항 제거)
   const form=$('#form'); if(form) form.innerHTML='';
 
   const {mbti}=model;
@@ -155,7 +164,7 @@ function renderResult(model){
   $('#result').innerHTML = `
 <pre>
 [결과]
-<span style="font-size:1.8rem;font-weight:800;">${mbti}</span>
+<strong class="type">${mbti}</strong>
 
 [팁]
 ${COMMON_TIPS.life}
@@ -234,7 +243,10 @@ function evaluateOrAsk(){
 }
 
 // ========== Boot ==========
-document.addEventListener('DOMContentLoaded', ()=>{
+function startApp(selectedMode){
+  mode = selectedMode;
+  $('#mode-select').style.display = 'none';
+  $('#form').style.display = 'block';
   loadData().then(()=>{
     askedTB={EI:0,SN:0,TF:0,JP:0};
     answers=[]; baseDone=false; pendingTBIds=[];
@@ -245,4 +257,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
     console.error('데이터 로드 실패:', err);
     $('#form').innerHTML='<div class="q"><h3>데이터를 불러오지 못했습니다.</h3><div class="hint">data/*.json 경로와 배포 캐시를 확인하세요.</div></div>';
   });
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  $('#btn-normal')?.addEventListener('click', ()=> startApp('normal'));
+  $('#btn-senior')?.addEventListener('click', ()=> startApp('senior'));
 });
