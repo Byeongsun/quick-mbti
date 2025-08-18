@@ -1,15 +1,11 @@
 // ========== Config ==========
-const VER = '2025-08-17-a';
+const VER = '2025-08-18';
 const AXES = ['EI','SN','TF','JP'];
 
-// 모드별 데이터 URL (추가문항은 "문항은행"에서만 더 뽑습니다)
+// 모드별 데이터 URL (추가문항은 같은 은행에서 더 뽑음)
 const DATA_URLS = {
-  normal: {
-    questions: `data/questions.json?v=${VER}`
-  },
-  senior: {
-    questions: `data/questions_senior.json?v=${VER}`
-  }
+  normal: { questions: `data/questions.json?v=${VER}` },
+  senior: { questions: `data/questions_senior.json?v=${VER}` }
 };
 
 // ========== DOM utils ==========
@@ -22,7 +18,7 @@ let KB = { questions:null };               // {EI:[],SN:[],TF:[],JP:[]}
 let baseQuestions = [];                    // 8개(각 축 2개)
 let baseIds = [];
 let usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
-let answers = [];                          // [{axis, value}]
+let answers = [];                          // [{axis, value}]  value ∈ E/I/S/N/T/F/J/P (MID 없음)
 let baseDone = false;
 let pendingIds = [];                       // 아직 응답 안 된 추가 문항 id들
 
@@ -61,7 +57,7 @@ function pickBaseQuestions(){
   for(let i=baseQuestions.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [baseQuestions[i],baseQuestions[j]]=[baseQuestions[j],baseQuestions[i]]; }
 }
 function pickExtraFromBank(axis){
-  // 아직 쓰지 않은 본문항(questions.json)에서 1개 추출
+  // 아직 쓰지 않은 문항에서 1개 추출
   const pool=KB.questions?.[axis]||[];
   const remain=pool.filter(it=>!usedPromptsByAxis[axis].has(it.prompt));
   if(remain.length===0) return null;
@@ -71,7 +67,7 @@ function pickExtraFromBank(axis){
 }
 
 // ========== Render ==========
-function makeQuestionBlock({id,axis,prompt,A,B,hint,isExtra=false,indexNum=null,allowMid=true}){
+function makeQuestionBlock({id,axis,prompt,A,B,hint,isExtra=false,indexNum=null}){
   const div=document.createElement('div');
   div.className='q'; div.dataset.axes=axis; div.id=id;
   const title=indexNum?`${indexNum}) ${prompt}`:prompt;
@@ -80,7 +76,6 @@ function makeQuestionBlock({id,axis,prompt,A,B,hint,isExtra=false,indexNum=null,
     <div class="opts">
       <label><input type="radio" name="${id}" value="${A.value}"> <span>${A.label}</span></label>
       <label><input type="radio" name="${id}" value="${B.value}"> <span>${B.label}</span></label>
-      ${allowMid ? `<label><input type="radio" name="${id}" value="MID"> <span>상황에 따라 다르다</span></label>` : ``}
     </div>
     <div class="req">이 문항에 답해주세요.</div>
     ${hint?`<div class="hint">${hint}${isExtra?' · (추가 질문)':''}</div>`:(isExtra?`<div class="hint">(추가 질문)</div>`:'')}
@@ -92,7 +87,7 @@ function renderBaseQuestions(){
   const form=$('#form'); form.innerHTML='';
   pickBaseQuestions();
   baseQuestions.forEach((q,i)=>{
-    form.appendChild(makeQuestionBlock({id:q.id,axis:q.axis,prompt:q.prompt,A:q.A,B:q.B,hint:q.hint,isExtra:false,indexNum:i+1,allowMid:true}));
+    form.appendChild(makeQuestionBlock({id:q.id,axis:q.axis,prompt:q.prompt,A:q.A,B:q.B,hint:q.hint,isExtra:false,indexNum:i+1}));
   });
 }
 
@@ -101,10 +96,10 @@ function collectAnswers(){
   answers = [];
   document.querySelectorAll('input[type="radio"]:checked').forEach(inp=>{
     const axis = inp.closest('.q')?.dataset?.axes;
-    const value = inp.value;
+    const value = inp.value; // E/I/S/N/T/F/J/P
     if(axis && value) answers.push({axis, value});
   });
-  // 필수 표기 (기본 8문항에만 적용)
+  // 필수 표기 (기본 8문항에만)
   baseIds.forEach(name=>{
     const picked=document.querySelector(`input[name="${name}"]:checked`);
     const req=$('#'+name)?.querySelector('.req');
@@ -122,8 +117,7 @@ function computeMBTI(ans){
   for (const {axis,value} of ans){
     if(!axis || !poles[axis]) continue;
     const [A,B] = poles[axis];
-    if(value==='MID'){ count[A]+=0.5; count[B]+=0.5; }
-    else if(value in count){ count[value]+=1; }
+    if(value in count){ count[value]+=1; }
     axisTotals[axis]++;
   }
 
@@ -141,25 +135,25 @@ function computeMBTI(ans){
   return {mbti,count,axisTotals,diff};
 }
 
-// 규칙 함수
+// 규칙 (MID 없음: 2문항→diff 2 또는 0 / 4문항→4,2,0 / 6문항→6,4,2,0)
 function needMoreAfter2(axis, model){
-  // 2문항에서 diff==2.0만 확정, 그 외는 추가 2문항
-  return model.axisTotals[axis]===2 && model.diff[axis] < 2.0;
+  // 2문항에서 diff==2만 확정, diff==0이면 추가 2문항
+  return model.axisTotals[axis]===2 && model.diff[axis] === 0;
 }
 function needMoreAfter4(axis, model){
-  // 4문항에서 diff==0(=2:2)만 추가 2문항
+  // 4문항에서 diff==0(=2:2)만 추가 2문항, diff>=2면 확정
   return model.axisTotals[axis]===4 && model.diff[axis] === 0;
 }
 function unresolvedAfter6(axis, model){
-  // 6문항까지 했는데도 diff<1.0 -> 판정 불가(혼재)
-  return model.axisTotals[axis]===6 && model.diff[axis] < 1.0;
+  // 6문항까지 했는데도 diff==0 -> 판정 불가(혼재)
+  return model.axisTotals[axis]===6 && model.diff[axis] === 0;
 }
 
 function hasPendingForAxis(axis){
   return pendingIds.some(id=> id.startsWith(`ex_${axis}_`) && !isAnswered(id));
 }
 
-function appendExtraFromBank(axis, count=2, allowMid=true){
+function appendExtraFromBank(axis, count=2){
   let added = 0;
   while (added < count){
     const item = pickExtraFromBank(axis);
@@ -169,7 +163,7 @@ function appendExtraFromBank(axis, count=2, allowMid=true){
       id, axis,
       prompt:`추가 문항 · ${item.prompt}`,
       A:item.A, B:item.B, hint:item.hint||'',
-      isExtra:true, allowMid
+      isExtra:true
     });
     $('#form').appendChild(block);
     pendingIds.push(id);
@@ -183,32 +177,32 @@ function appendExtraFromBank(axis, count=2, allowMid=true){
 function evaluateOrAsk(){
   const model = computeMBTI(answers);
 
-  // 이미 답변한 추가문항 제거
+  // 이미 답변한 추가문항 id 정리
   pendingIds = pendingIds.filter(id=>!isAnswered(id));
 
-  // (1) 2문항 단계: diff<2.0 -> 추가 2문항
+  // (1) 2문항 단계: diff==0 -> 추가 2문항
   let added = 0;
   for (const axis of AXES){
-    if(!baseDone) continue; // 기본 8문항이 끝난 뒤부터 동작
+    if(!baseDone) continue;
     if (needMoreAfter2(axis, model) && !hasPendingForAxis(axis)){
-      if (appendExtraFromBank(axis, 2, true)) added++;
-    }
-  }
-  if (added>0) return; // 방금 추가했으면 응답 대기
-
-  // (2) 4문항 단계: diff==0(=2:2) -> 추가 2문항
-  added = 0;
-  for (const axis of AXES){
-    if (needMoreAfter4(axis, model) && !hasPendingForAxis(axis)){
-      if (appendExtraFromBank(axis, 2, true)) added++;
+      if (appendExtraFromBank(axis, 2)) added++;
     }
   }
   if (added>0) return;
 
-  // (3) 아직 대기 중 질문이 있으면 결과 보류
+  // (2) 4문항 단계: diff==0 -> 추가 2문항
+  added = 0;
+  for (const axis of AXES){
+    if (needMoreAfter4(axis, model) && !hasPendingForAxis(axis)){
+      if (appendExtraFromBank(axis, 2)) added++;
+    }
+  }
+  if (added>0) return;
+
+  // (3) 아직 대기 중 질문 있으면 결과 보류
   if (!allPendingAnswered()) return;
 
-  // (4) 최종 판정: 6문항까지 했는데도 diff<1.0 -> '판정 불가(혼재)'
+  // (4) 최종 판정: 6문항에서도 diff==0 이면 판정 불가
   const final = computeMBTI(answers);
   const unresolved = AXES.filter(axis => unresolvedAfter6(axis, final));
 
@@ -272,7 +266,7 @@ function onAnyChange(){
   collectAnswers();
 
   if(!baseDone){
-    if(countBaseAnswered() < 8) return; // 기본 8문항이 모두 응답되어야 시작
+    if(countBaseAnswered() < 8) return; // 기본 8문항 모두 응답되어야 시작
     baseDone = true;
     evaluateOrAsk();
     return;
