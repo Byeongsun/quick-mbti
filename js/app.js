@@ -1,33 +1,47 @@
 // ========== Config ==========
 const VER = '2025-08-18';
 const AXES = ['EI','SN','TF','JP'];
+const DATA_URL = `data/questions_bank.json?v=${VER}`;
 
-// 모드별 데이터 URL (추가문항은 같은 은행에서 더 뽑음)
-const DATA_URLS = {
-  normal: { questions: `data/questions.json?v=${VER}` },
-  senior: { questions: `data/questions_senior.json?v=${VER}` }
-};
+// 출제 범위: 'all' | 'general' | 'senior'
+let audienceFilter = 'all';
 
 // ========== DOM utils ==========
 const $ = s => document.querySelector(s);
 function scrollToEl(el){ try{ el?.scrollIntoView({behavior:'smooth', block:'center'});}catch{} }
 
 // ========== State ==========
-let mode = null; // 'normal' | 'senior'
-let KB = { questions:null };               // {EI:[],SN:[],TF:[],JP:[]}
-let baseQuestions = [];                    // 8개(각 축 2개)
+let KB = { raw:null, bank:null };       // raw=원본, bank=필터 적용된 뷰
+let modeInited = false;
+let baseQuestions = [];                 // 8개(각 축 2개)
 let baseIds = [];
 let usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
-let answers = [];                          // [{axis, value}]  value ∈ E/I/S/N/T/F/J/P (MID 없음)
+let answers = [];                       // [{axis, value}]  value ∈ E/I/S/N/T/F/J/P (중립 없음)
 let baseDone = false;
-let pendingIds = [];                       // 아직 응답 안 된 추가 문항 id들
+let pendingIds = [];                    // 아직 응답 안 된 추가 문항 id들
 
-// ========== Load ==========
+// ========== Load & Filter ==========
 async function loadData(){
-  const urls = DATA_URLS[mode];
-  const qRes = await fetch(urls.questions, {cache:'no-store'});
-  if(!qRes.ok) throw new Error('questions 로드 실패: '+qRes.status);
-  KB.questions = await qRes.json();
+  const qRes = await fetch(DATA_URL, {cache:'no-store'});
+  if(!qRes.ok) throw new Error('문항 로드 실패: '+qRes.status);
+  KB.raw = await qRes.json();
+  KB.bank = filterByAudience(KB.raw, audienceFilter);
+}
+
+function filterByAudience(raw, filter){
+  const out = {EI:[], SN:[], TF:[], JP:[]};
+  const ok = (aud) => {
+    if(!aud) return true;
+    if(filter==='all') return true;
+    if(aud==='both') return true;
+    return aud===filter;
+  };
+  for(const axis of AXES){
+    for(const q of (raw[axis]||[])){
+      if(ok(q.audience)) out[axis].push(q);
+    }
+  }
+  return out;
 }
 
 // ========== Question pickers ==========
@@ -44,7 +58,7 @@ function pickBaseQuestions(){
   baseQuestions = []; baseIds = [];
   usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
   AXES.forEach(axis=>{
-    const bank=KB.questions?.[axis]||[];
+    const bank=KB.bank?.[axis]||[];
     if(bank.length<2) throw new Error(`${axis} 축 문제은행이 2개 미만입니다.`);
     const [qA,qB]=sampleTwo(bank);
     const q1={id:`base_${axis}_1`,axis,...qA};
@@ -58,7 +72,7 @@ function pickBaseQuestions(){
 }
 function pickExtraFromBank(axis){
   // 아직 쓰지 않은 문항에서 1개 추출
-  const pool=KB.questions?.[axis]||[];
+  const pool=KB.bank?.[axis]||[];
   const remain=pool.filter(it=>!usedPromptsByAxis[axis].has(it.prompt));
   if(remain.length===0) return null;
   const item=remain[Math.floor(Math.random()*remain.length)];
@@ -116,7 +130,6 @@ function computeMBTI(ans){
 
   for (const {axis,value} of ans){
     if(!axis || !poles[axis]) continue;
-    const [A,B] = poles[axis];
     if(value in count){ count[value]+=1; }
     axisTotals[axis]++;
   }
@@ -135,13 +148,13 @@ function computeMBTI(ans){
   return {mbti,count,axisTotals,diff};
 }
 
-// 규칙 (MID 없음: 2문항→diff 2 또는 0 / 4문항→4,2,0 / 6문항→6,4,2,0)
+// 규칙 (중립 없음): 2문항→diff 2 또는 0 / 4문항→4,2,0 / 6문항→6,4,2,0
 function needMoreAfter2(axis, model){
-  // 2문항에서 diff==2만 확정, diff==0이면 추가 2문항
+  // 2문항에서 diff==0(=1:1)만 추가 2문항
   return model.axisTotals[axis]===2 && model.diff[axis] === 0;
 }
 function needMoreAfter4(axis, model){
-  // 4문항에서 diff==0(=2:2)만 추가 2문항, diff>=2면 확정
+  // 4문항에서 diff==0(=2:2)만 추가 2문항
   return model.axisTotals[axis]===4 && model.diff[axis] === 0;
 }
 function unresolvedAfter6(axis, model){
@@ -171,6 +184,22 @@ function appendExtraFromBank(axis, count=2){
   }
   if(added>0){ scrollToEl($('#form').lastElementChild); return true; }
   return false;
+}
+
+// 동률 축을 이중 표기로 렌더링
+function formatTypeWithUnresolved(model, unresolvedAxes=[]) {
+  const lead = {
+    EI: (model.count.E >= model.count.I) ? 'E' : 'I',
+    SN: (model.count.S >= model.count.N) ? 'S' : 'N',
+    TF: (model.count.T >= model.count.F) ? 'T' : 'F',
+    JP: (model.count.J >= model.count.P) ? 'J' : 'P',
+  };
+  const poles = { EI:['E','I'], SN:['S','N'], TF:['T','F'], JP:['J','P'] };
+  return ['EI','SN','TF','JP'].map(axis=>{
+    const [a,b] = poles[axis];
+    if (unresolvedAxes.includes(axis)) return `(${a}/${b})`;
+    return lead[axis];
+  }).join('');
 }
 
 // 메인 평가
@@ -230,13 +259,13 @@ function renderResult(model, unresolvedAxes=[]){
   ensureReportStyles();
   const form=$('#form'); if(form) form.innerHTML='';
 
-  const {mbti}=model;
+  const displayType = formatTypeWithUnresolved(model, unresolvedAxes);
   const unresolvedNote = unresolvedAxes.length ? `\n[참고] 일부 축은 판정 불가(혼재): ${unresolvedAxes.join(', ')}` : '';
 
   $('#result').innerHTML = `
 <pre>
 [결과]
-<strong class="type">${mbti}</strong>${unresolvedNote}
+<strong class="type">${displayType}</strong>${unresolvedNote}
 
 [팁]
 ${COMMON_TIPS.life}
@@ -274,8 +303,8 @@ function onAnyChange(){
   evaluateOrAsk(); // 추가 문항 응답 때마다 평가
 }
 
-function startApp(selectedMode){
-  mode = selectedMode;
+function startApp(filter){
+  audienceFilter = filter; // 'all' | 'general' | 'senior'
   $('#mode-select').style.display = 'none';
   $('#form').style.display = 'block';
   loadData().then(()=>{
@@ -285,11 +314,14 @@ function startApp(selectedMode){
     $('#form').addEventListener('change', onAnyChange, {passive:true});
   }).catch(err=>{
     console.error('데이터 로드 실패:', err);
-    $('#form').innerHTML='<div class="q"><h3>데이터를 불러오지 못했습니다.</h3><div class="hint">data/*.json 경로와 캐시를 확인하세요.</div></div>';
+    $('#form').innerHTML='<div class="q"><h3>데이터를 불러오지 못했습니다.</h3><div class="hint">data/questions_bank.json 경로와 캐시를 확인하세요.</div></div>';
   });
 }
 
 document.addEventListener('DOMContentLoaded', ()=>{
-  $('#btn-normal')?.addEventListener('click', ()=> startApp('normal'));
+  if(modeInited) return;
+  $('#btn-all')?.addEventListener('click', ()=> startApp('all'));
+  $('#btn-general')?.addEventListener('click', ()=> startApp('general'));
   $('#btn-senior')?.addEventListener('click', ()=> startApp('senior'));
+  modeInited = true;
 });
