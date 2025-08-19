@@ -1,10 +1,11 @@
 // ========== Config ==========
-const VER = '2025-08-18';
+const VER = '2025-08-18-1';
 const AXES = ['EI','SN','TF','JP'];
-const DATA_URL = `data/questions_bank.json?v=${VER}`;
+// 상대경로(깃허브 페이지스에서 하위 디렉토리라도 동작). 절대경로(/) 쓰면 404 날 수 있음
+const DATA_URL = `./data/questions_bank.json?v=${VER}`;
 
-// 출제 범위: 'all' | 'general' | 'senior'
-let audienceFilter = 'all';
+// 출제 범위: 'general' | 'senior'
+let audienceFilter = 'general';
 
 // ========== DOM utils ==========
 const $ = s => document.querySelector(s);
@@ -12,7 +13,6 @@ function scrollToEl(el){ try{ el?.scrollIntoView({behavior:'smooth', block:'cent
 
 // ========== State ==========
 let KB = { raw:null, bank:null };       // raw=원본, bank=필터 적용된 뷰
-let modeInited = false;
 let baseQuestions = [];                 // 8개(각 축 2개)
 let baseIds = [];
 let usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
@@ -20,19 +20,75 @@ let answers = [];                       // [{axis, value}]  value ∈ E/I/S/N/T/
 let baseDone = false;
 let pendingIds = [];                    // 아직 응답 안 된 추가 문항 id들
 
+// ----------- 폴백(내장) 문항: 각 축 4문항(일반2+어르신2) -----------
+const FALLBACK_BANK = {
+  EI: [
+    { audience:'general', prompt:'가족 단톡방에서 즉흥적으로 주말 피크닉 제안이 나왔습니다.',
+      A:{label:'바로 좋다고 하고 준비를 나눈다.', value:'E'}, B:{label:'일정을 보고 가능하면 참여하겠다고 답한다.', value:'I'} },
+    { audience:'general', prompt:'배우자 친구들과의 저녁 식사에 동행하게 되었습니다.',
+      A:{label:'새로운 사람들과 이야기 나누는 걸 즐긴다.', value:'E'}, B:{label:'모르는 사람과의 식사는 피곤할 수 있어 조심스럽다.', value:'I'} },
+    { audience:'senior', prompt:'손주가 저녁에 같이 산책하며 이야기하자고 합니다.',
+      A:{label:'밖에서 사람들 보며 함께 걷고 대화하는 게 즐겁다.', value:'E'}, B:{label:'오늘은 집에서 쉬며 조용히 시간을 보내고 싶다.', value:'I'} },
+    { audience:'senior', prompt:'경로당에 새 회원이 왔는데 어색해 보입니다.',
+      A:{label:'먼저 다가가 자리 안내와 인사를 건네 분위기를 풀어준다.', value:'E'}, B:{label:'상황을 지켜보고 시간이 지나면 자연스럽게 말을 건넨다.', value:'I'} }
+  ],
+  SN: [
+    { audience:'general', prompt:'가족 여행을 계획합니다.',
+      A:{label:'세부 일정·숙소·교통을 꼼꼼히 확정한다.', value:'S'}, B:{label:'분위기와 경험을 먼저 그린 뒤 현지에서 유연하게 정한다.', value:'N'} },
+    { audience:'general', prompt:'아이의 식습관 개선을 시작합니다.',
+      A:{label:'하루 섭취량과 메뉴를 구체적으로 기록한다.', value:'S'}, B:{label:'긍정 경험을 쌓는 장기 전략을 먼저 상상한다.', value:'N'} },
+    { audience:'senior', prompt:'정기 검진 예약을 잡아야 합니다.',
+      A:{label:'병원·이동·준비사항을 구체적으로 확인해 확정한다.', value:'S'}, B:{label:'생활 흐름을 보며 여유 있는 날로 생각해 둔다.', value:'N'} },
+    { audience:'senior', prompt:'낙상 예방을 위해 집안을 점검합니다.',
+      A:{label:'미끄럼 방지·조명·손잡이 등 구체 항목을 체크한다.', value:'S'}, B:{label:'다양한 상황을 상상해 동선을 바꾸는 큰 그림을 먼저 잡는다.', value:'N'} }
+  ],
+  TF: [
+    { audience:'general', prompt:'배우자가 건강검진 결과에 대해 걱정합니다.',
+      A:{label:'수치를 분석해 해석하고 다음 조치를 함께 정한다.', value:'T'}, B:{label:'불안을 공감하고 마음을 안정시키는 말을 건넨다.', value:'F'} },
+    { audience:'general', prompt:'가족 모임 비용 분담 문제로 불만이 나왔습니다.',
+      A:{label:'공정한 기준을 정해 명확히 합의하도록 이끈다.', value:'T'}, B:{label:'서로 사정을 듣고 모두가 덜 상하는 합의점을 찾는다.', value:'F'} },
+    { audience:'senior', prompt:'이웃과 소음 문제로 다툼이 있었습니다.',
+      A:{label:'사실관계를 정리해 해결 절차를 제안한다.', value:'T'}, B:{label:'감정을 달래며 관계가 상하지 않게 조율한다.', value:'F'} },
+    { audience:'senior', prompt:'손주가 학업 문제로 속상해합니다.',
+      A:{label:'원인을 분석하고 실천 계획을 세운다.', value:'T'}, B:{label:'마음을 충분히 들어주고 응원한다.', value:'F'} }
+  ],
+  JP: [
+    { audience:'general', prompt:'아이 예방접종 일정을 관리해야 합니다.',
+      A:{label:'달력에 미리 표시하고 알람을 설정한다.', value:'J'}, B:{label:'가까워지면 확인해 진행한다.', value:'P'} },
+    { audience:'general', prompt:'가족 여행 날 아침 예상치 못한 비가 옵니다.',
+      A:{label:'대체 일정을 적용해 모두에게 공유한다.', value:'J'}, B:{label:'현장 분위기에 맞춰 즉흥적으로 바꾼다.', value:'P'} },
+    { audience:'senior', prompt:'정기 검진과 약 복용 일정을 관리합니다.',
+      A:{label:'달력과 알람으로 미리 준비한다.', value:'J'}, B:{label:'필요해지면 그때 확인해 진행한다.', value:'P'} },
+    { audience:'senior', prompt:'집안 정리·청소를 합니다.',
+      A:{label:'구역을 나누고 순서대로 끝낸다.', value:'J'}, B:{label:'눈에 띄는 곳부터 유연하게 처리한다.', value:'P'} }
+  ]
+};
+
 // ========== Load & Filter ==========
 async function loadData(){
-  const qRes = await fetch(DATA_URL, {cache:'no-store'});
-  if(!qRes.ok) throw new Error('문항 로드 실패: '+qRes.status);
-  KB.raw = await qRes.json();
+  try{
+    const qRes = await fetch(DATA_URL, {cache:'no-store'});
+    if(!qRes.ok) throw new Error('HTTP '+qRes.status);
+    const raw = await qRes.json();
+    KB.raw = raw;
+  }catch(e){
+    console.warn('[경고] questions_bank.json 로드 실패. 폴백 데이터 사용:', e);
+    // 폴백 사용
+    KB.raw = FALLBACK_BANK;
+    // 화면 안내
+    const msg = document.createElement('div');
+    msg.className = 'q';
+    msg.innerHTML = `<h3>문항 파일을 불러오지 못했습니다.</h3>
+      <div class="hint">data/questions_bank.json 경로/대소문자/위치를 확인해주세요. (임시 폴백 데이터로 진행합니다)</div>`;
+    $('#form').before(msg);
+  }
   KB.bank = filterByAudience(KB.raw, audienceFilter);
 }
 
 function filterByAudience(raw, filter){
   const out = {EI:[], SN:[], TF:[], JP:[]};
   const ok = (aud) => {
-    if(!aud) return true;
-    if(filter==='all') return true;
+    if(!aud) return true;            // 태그 없으면 포함
     if(aud==='both') return true;
     return aud===filter;
   };
@@ -51,6 +107,7 @@ function shuffleIdx(n){
   return idx;
 }
 function sampleTwo(arr){
+  if(arr.length===1) return [arr[0], arr[0]]; // 방어
   const idx=shuffleIdx(arr.length);
   return [arr[idx[0]], arr[idx[1]]];
 }
@@ -59,7 +116,17 @@ function pickBaseQuestions(){
   usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
   AXES.forEach(axis=>{
     const bank=KB.bank?.[axis]||[];
-    if(bank.length<2) throw new Error(`${axis} 축 문제은행이 2개 미만입니다.`);
+    if(bank.length<2) {
+      if(bank.length===0) throw new Error(`${axis} 축 문제은행이 비어 있습니다.`);
+      // 최소 방어: 1개만 있으면 중복 출제
+      const [qA,qB]=sampleTwo(bank);
+      const q1={id:`base_${axis}_1`,axis,...qA};
+      const q2={id:`base_${axis}_2`,axis,...qB};
+      baseQuestions.push(q1,q2);
+      baseIds.push(q1.id,q2.id);
+      usedPromptsByAxis[axis].add(qA.prompt); usedPromptsByAxis[axis].add(qB.prompt);
+      return;
+    }
     const [qA,qB]=sampleTwo(bank);
     const q1={id:`base_${axis}_1`,axis,...qA};
     const q2={id:`base_${axis}_2`,axis,...qB};
@@ -71,7 +138,6 @@ function pickBaseQuestions(){
   for(let i=baseQuestions.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [baseQuestions[i],baseQuestions[j]]=[baseQuestions[j],baseQuestions[i]]; }
 }
 function pickExtraFromBank(axis){
-  // 아직 쓰지 않은 문항에서 1개 추출
   const pool=KB.bank?.[axis]||[];
   const remain=pool.filter(it=>!usedPromptsByAxis[axis].has(it.prompt));
   if(remain.length===0) return null;
@@ -110,10 +176,10 @@ function collectAnswers(){
   answers = [];
   document.querySelectorAll('input[type="radio"]:checked').forEach(inp=>{
     const axis = inp.closest('.q')?.dataset?.axes;
-    const value = inp.value; // E/I/S/N/T/F/J/P
+    const value = inp.value;
     if(axis && value) answers.push({axis, value});
   });
-  // 필수 표기 (기본 8문항에만)
+  // 필수 표기 (기본 8문항)
   baseIds.forEach(name=>{
     const picked=document.querySelector(`input[name="${name}"]:checked`);
     const req=$('#'+name)?.querySelector('.req');
@@ -127,44 +193,28 @@ function allPendingAnswered(){ return pendingIds.every(id=>isAnswered(id)); }
 function computeMBTI(ans){
   const count={E:0,I:0,S:0,N:0,T:0,F:0,J:0,P:0}, axisTotals={EI:0,SN:0,TF:0,JP:0};
   const poles = { EI:['E','I'], SN:['S','N'], TF:['T','F'], JP:['J','P'] };
-
   for (const {axis,value} of ans){
     if(!axis || !poles[axis]) continue;
     if(value in count){ count[value]+=1; }
     axisTotals[axis]++;
   }
-
   const diff = {
     EI: Math.abs(count.E-count.I),
     SN: Math.abs(count.S-count.N),
     TF: Math.abs(count.T-count.F),
     JP: Math.abs(count.J-count.P)
   };
-
   const pick=(a,b,def)=> count[a]>count[b]?a:count[a]<count[b]?b:def;
   const ei=pick('E','I','E'), sn=pick('S','N','S'), tf=pick('T','F','T'), jp=pick('J','P','J');
   const mbti = ei+sn+tf+jp;
-
   return {mbti,count,axisTotals,diff};
 }
 
-// 규칙 (중립 없음): 2문항→diff 2 또는 0 / 4문항→4,2,0 / 6문항→6,4,2,0
-function needMoreAfter2(axis, model){
-  // 2문항에서 diff==0(=1:1)만 추가 2문항
-  return model.axisTotals[axis]===2 && model.diff[axis] === 0;
-}
-function needMoreAfter4(axis, model){
-  // 4문항에서 diff==0(=2:2)만 추가 2문항
-  return model.axisTotals[axis]===4 && model.diff[axis] === 0;
-}
-function unresolvedAfter6(axis, model){
-  // 6문항까지 했는데도 diff==0 -> 판정 불가(혼재)
-  return model.axisTotals[axis]===6 && model.diff[axis] === 0;
-}
-
-function hasPendingForAxis(axis){
-  return pendingIds.some(id=> id.startsWith(`ex_${axis}_`) && !isAnswered(id));
-}
+// 규칙: 2문항 diff==0 → +2, 4문항 diff==0 → +2, 6문항 diff==0 → 판정 불가
+function needMoreAfter2(axis, model){ return model.axisTotals[axis]===2 && model.diff[axis] === 0; }
+function needMoreAfter4(axis, model){ return model.axisTotals[axis]===4 && model.diff[axis] === 0; }
+function unresolvedAfter6(axis, model){ return model.axisTotals[axis]===6 && model.diff[axis] === 0; }
+function hasPendingForAxis(axis){ return pendingIds.some(id=> id.startsWith(`ex_${axis}_`) && !isAnswered(id)); }
 
 function appendExtraFromBank(axis, count=2){
   let added = 0;
@@ -186,7 +236,7 @@ function appendExtraFromBank(axis, count=2){
   return false;
 }
 
-// 동률 축을 이중 표기로 렌더링
+// 동률 축 이중 표기
 function formatTypeWithUnresolved(model, unresolvedAxes=[]) {
   const lead = {
     EI: (model.count.E >= model.count.I) ? 'E' : 'I',
@@ -202,7 +252,7 @@ function formatTypeWithUnresolved(model, unresolvedAxes=[]) {
   }).join('');
 }
 
-// 메인 평가
+// 평가
 function evaluateOrAsk(){
   const model = computeMBTI(answers);
 
@@ -231,14 +281,13 @@ function evaluateOrAsk(){
   // (3) 아직 대기 중 질문 있으면 결과 보류
   if (!allPendingAnswered()) return;
 
-  // (4) 최종 판정: 6문항에서도 diff==0 이면 판정 불가
+  // (4) 최종 판정
   const final = computeMBTI(answers);
   const unresolved = AXES.filter(axis => unresolvedAfter6(axis, final));
-
   renderResult(final, unresolved);
 }
 
-// ========== 결과 화면 ==========
+// 결과 화면
 const COMMON_TIPS = {
   life:  "생활: 에너지 패턴을 이해하고 휴식 규칙을 마련하세요.",
   work:  "일: 강점 역할을 명확히 하고 협업 방식을 합의하세요.",
@@ -290,10 +339,9 @@ P (Perceiving, 인식): 상황에 맞춰 유연하게 적응하며, 열린 선�
   scrollToEl($('#result'));
 }
 
-// ========== Boot ==========
+// 부트스트랩
 function onAnyChange(){
   collectAnswers();
-
   if(!baseDone){
     if(countBaseAnswered() < 8) return; // 기본 8문항 모두 응답되어야 시작
     baseDone = true;
@@ -304,7 +352,7 @@ function onAnyChange(){
 }
 
 function startApp(filter){
-  audienceFilter = filter; // 'all' | 'general' | 'senior'
+  audienceFilter = filter; // 'general' | 'senior'
   $('#mode-select').style.display = 'none';
   $('#form').style.display = 'block';
   loadData().then(()=>{
@@ -313,15 +361,12 @@ function startApp(filter){
     renderBaseQuestions();
     $('#form').addEventListener('change', onAnyChange, {passive:true});
   }).catch(err=>{
-    console.error('데이터 로드 실패:', err);
+    console.error('데이터 로드 실패(폴백도 실패):', err);
     $('#form').innerHTML='<div class="q"><h3>데이터를 불러오지 못했습니다.</h3><div class="hint">data/questions_bank.json 경로와 캐시를 확인하세요.</div></div>';
   });
 }
 
 document.addEventListener('DOMContentLoaded', ()=>{
-  if(modeInited) return;
-  $('#btn-all')?.addEventListener('click', ()=> startApp('all'));
   $('#btn-general')?.addEventListener('click', ()=> startApp('general'));
-  $('#btn-senior')?.addEventListener('click', ()=> startApp('senior'));
-  modeInited = true;
+  $('#btn-senior')?.addEventListener('click',  ()=> startApp('senior'));
 });

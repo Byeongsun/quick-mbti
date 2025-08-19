@@ -34,18 +34,21 @@
   <div class="wrap">
     <h1>Quick-MBTI : 빠르게 MBTI를 알려줍니다</h1>
 
-    <!-- 출제 범위 선택 (통합/일반/어르신) -->
+    <!-- 출제 범위 선택 -->
     <div id="mode-select" class="card mode-box">
+      <div>
+        <div style="font-weight:600;margin-bottom:6px">출제 범위를 고르세요</div>
+        <div class="muted">기본 8문항 · 동률이면 같은 축에서 자동으로 추가(최대 6문항)</div>
+      </div>
       <div style="flex:1 0 100%"></div>
-      <button id="btn-all" type="button">전체 (통합 랜덤)</button>
-      <button id="btn-general" type="button">일반 전용</button>
-      <button id="btn-senior" type="button">어르신 전용</button>
+      <button id="btn-general" type="button">일반</button>
+      <button id="btn-senior" type="button">어르신(65세 이상)</button>
     </div>
 
     <form id="form" style="display:none"></form>
     <section id="result" aria-live="polite"></section>
   </div>
 
-  <script src="js/app.js?v=2025-08-18" defer></script>
+  <script src="js/app.js?v=2025-08-18-1" defer></script>
 </body>
 </html>
