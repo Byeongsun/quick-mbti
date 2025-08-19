@@ -1,8 +1,8 @@
 // ========== Config ==========
-const VER = '2025-08-18-1';
+const VER = '2025-08-19';
 const AXES = ['EI','SN','TF','JP'];
-// 상대경로(깃허브 페이지스에서 하위 디렉토리라도 동작). 절대경로(/) 쓰면 404 날 수 있음
-const DATA_URL = `./data/questions_bank.json?v=${VER}`;
+// 같은 폴더에 있는 통합 문항은행
+const DATA_URL = `./questions_bank.json?ts=${Date.now()}`;
 
 // 출제 범위: 'general' | 'senior'
 let audienceFilter = 'general';
@@ -12,151 +12,83 @@ const $ = s => document.querySelector(s);
 function scrollToEl(el){ try{ el?.scrollIntoView({behavior:'smooth', block:'center'});}catch{} }
 
 // ========== State ==========
-let KB = { raw:null, bank:null };       // raw=원본, bank=필터 적용된 뷰
-let baseQuestions = [];                 // 8개(각 축 2개)
+let KB = { raw:null, bank:null };
+let baseQuestions = []; // 8개(각 축 2개)
 let baseIds = [];
 let usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
-let answers = [];                       // [{axis, value}]  value ∈ E/I/S/N/T/F/J/P (중립 없음)
+let answers = [];       // {axis, value}  value∈ E/I/S/N/T/F/J/P
 let baseDone = false;
-let pendingIds = [];                    // 아직 응답 안 된 추가 문항 id들
+let pendingIds = [];
 
-// ----------- 폴백(내장) 문항: 각 축 4문항(일반2+어르신2) -----------
+// (옵션) 폴백 샘플 — JSON을 못 읽을 때 최소 동작 보장
 const FALLBACK_BANK = {
   EI: [
     { audience:'general', prompt:'가족 단톡방에서 즉흥적으로 주말 피크닉 제안이 나왔습니다.',
       A:{label:'바로 좋다고 하고 준비를 나눈다.', value:'E'}, B:{label:'일정을 보고 가능하면 참여하겠다고 답한다.', value:'I'} },
-    { audience:'general', prompt:'배우자 친구들과의 저녁 식사에 동행하게 되었습니다.',
-      A:{label:'새로운 사람들과 이야기 나누는 걸 즐긴다.', value:'E'}, B:{label:'모르는 사람과의 식사는 피곤할 수 있어 조심스럽다.', value:'I'} },
-    { audience:'senior', prompt:'손주가 저녁에 같이 산책하며 이야기하자고 합니다.',
-      A:{label:'밖에서 사람들 보며 함께 걷고 대화하는 게 즐겁다.', value:'E'}, B:{label:'오늘은 집에서 쉬며 조용히 시간을 보내고 싶다.', value:'I'} },
-    { audience:'senior', prompt:'경로당에 새 회원이 왔는데 어색해 보입니다.',
-      A:{label:'먼저 다가가 자리 안내와 인사를 건네 분위기를 풀어준다.', value:'E'}, B:{label:'상황을 지켜보고 시간이 지나면 자연스럽게 말을 건넨다.', value:'I'} }
+    { audience:'senior',  prompt:'손주가 저녁에 같이 산책하며 이야기하자고 합니다.',
+      A:{label:'밖에서 사람들 보며 함께 걷고 대화하는 게 즐겁다.', value:'E'}, B:{label:'오늘은 집에서 쉬며 조용히 시간을 보내고 싶다.', value:'I'} }
   ],
   SN: [
     { audience:'general', prompt:'가족 여행을 계획합니다.',
       A:{label:'세부 일정·숙소·교통을 꼼꼼히 확정한다.', value:'S'}, B:{label:'분위기와 경험을 먼저 그린 뒤 현지에서 유연하게 정한다.', value:'N'} },
-    { audience:'general', prompt:'아이의 식습관 개선을 시작합니다.',
-      A:{label:'하루 섭취량과 메뉴를 구체적으로 기록한다.', value:'S'}, B:{label:'긍정 경험을 쌓는 장기 전략을 먼저 상상한다.', value:'N'} },
-    { audience:'senior', prompt:'정기 검진 예약을 잡아야 합니다.',
-      A:{label:'병원·이동·준비사항을 구체적으로 확인해 확정한다.', value:'S'}, B:{label:'생활 흐름을 보며 여유 있는 날로 생각해 둔다.', value:'N'} },
-    { audience:'senior', prompt:'낙상 예방을 위해 집안을 점검합니다.',
-      A:{label:'미끄럼 방지·조명·손잡이 등 구체 항목을 체크한다.', value:'S'}, B:{label:'다양한 상황을 상상해 동선을 바꾸는 큰 그림을 먼저 잡는다.', value:'N'} }
+    { audience:'senior',  prompt:'정기 검진 예약을 잡아야 합니다.',
+      A:{label:'병원·이동·준비사항을 구체적으로 확인해 확정한다.', value:'S'}, B:{label:'생활 흐름을 보며 여유 있는 날로 생각해 둔다.', value:'N'} }
   ],
   TF: [
     { audience:'general', prompt:'배우자가 건강검진 결과에 대해 걱정합니다.',
       A:{label:'수치를 분석해 해석하고 다음 조치를 함께 정한다.', value:'T'}, B:{label:'불안을 공감하고 마음을 안정시키는 말을 건넨다.', value:'F'} },
-    { audience:'general', prompt:'가족 모임 비용 분담 문제로 불만이 나왔습니다.',
-      A:{label:'공정한 기준을 정해 명확히 합의하도록 이끈다.', value:'T'}, B:{label:'서로 사정을 듣고 모두가 덜 상하는 합의점을 찾는다.', value:'F'} },
-    { audience:'senior', prompt:'이웃과 소음 문제로 다툼이 있었습니다.',
-      A:{label:'사실관계를 정리해 해결 절차를 제안한다.', value:'T'}, B:{label:'감정을 달래며 관계가 상하지 않게 조율한다.', value:'F'} },
-    { audience:'senior', prompt:'손주가 학업 문제로 속상해합니다.',
-      A:{label:'원인을 분석하고 실천 계획을 세운다.', value:'T'}, B:{label:'마음을 충분히 들어주고 응원한다.', value:'F'} }
+    { audience:'senior',  prompt:'이웃과 소음 문제로 다툼이 있었습니다.',
+      A:{label:'사실관계를 정리해 해결 절차를 제안한다.', value:'T'}, B:{label:'감정을 달래며 관계가 상하지 않게 조율한다.', value:'F'} }
   ],
   JP: [
-    { audience:'general', prompt:'아이 예방접종 일정을 관리해야 합니다.',
-      A:{label:'달력에 미리 표시하고 알람을 설정한다.', value:'J'}, B:{label:'가까워지면 확인해 진행한다.', value:'P'} },
     { audience:'general', prompt:'가족 여행 날 아침 예상치 못한 비가 옵니다.',
       A:{label:'대체 일정을 적용해 모두에게 공유한다.', value:'J'}, B:{label:'현장 분위기에 맞춰 즉흥적으로 바꾼다.', value:'P'} },
-    { audience:'senior', prompt:'정기 검진과 약 복용 일정을 관리합니다.',
-      A:{label:'달력과 알람으로 미리 준비한다.', value:'J'}, B:{label:'필요해지면 그때 확인해 진행한다.', value:'P'} },
-    { audience:'senior', prompt:'집안 정리·청소를 합니다.',
-      A:{label:'구역을 나누고 순서대로 끝낸다.', value:'J'}, B:{label:'눈에 띄는 곳부터 유연하게 처리한다.', value:'P'} }
+    { audience:'senior',  prompt:'정기 검진과 약 복용 일정을 관리합니다.',
+      A:{label:'달력과 알람으로 미리 준비한다.', value:'J'}, B:{label:'필요해지면 그때 확인해 진행한다.', value:'P'} }
   ]
 };
 
 // ========== Load & Filter ==========
-async function loadData() {
-  // 1) 현재 페이지의 "리포지토리 루트"를 계산 (예: https://byeongsun.github.io/quick-mbti/)
-  const { origin, pathname } = location;
-  // pathname이 /quick-mbti/ 또는 /quick-mbti/index.html 같은 형태일 때 리포 루트 산출
-  const seg = pathname.split('/').filter(Boolean); // ["quick-mbti", "index.html"] 등
-  const repoRoot = seg.length ? `/${seg[0]}/` : '/'; // /quick-mbti/ 또는 /
-  const absUrl = `${origin}${repoRoot}data/questions_bank.json?ts=${Date.now()}`;
-
-  // 2) 후보 URL 순차 시도: (a) 정확 절대경로, (b) 상대경로(동일폴더), (c) docs 하위 가능성
-  const CANDIDATES = [
-    absUrl,
-    `./data/questions_bank.json?ts=${Date.now()}`,
-    `data/questions_bank.json?ts=${Date.now()}`,
-    `${origin}${repoRoot}docs/data/questions_bank.json?ts=${Date.now()}`
-  ];
-
-  let lastErr = null;
-  for (const url of CANDIDATES) {
-    try {
-      console.log('[questions] try:', url);
-      const res = await fetch(url, { cache: 'no-store', mode: 'same-origin' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      KB.raw = await res.json();
-      KB.bank = filterByAudience(KB.raw, audienceFilter);
-
-      // 화면에 성공 경로를 안내(한 번만)
-      const okMsg = document.createElement('div');
-      okMsg.className = 'q';
-      okMsg.innerHTML = `<div class="hint">문항 파일 로드됨: <code>${url.replace(origin,'')}</code></div>`;
-      document.querySelector('#form')?.before(okMsg);
-      return;
-    } catch (e) {
-      console.warn('[questions] fail:', url, e);
-      lastErr = e;
-    }
+async function loadData(){
+  try{
+    const res = await fetch(DATA_URL, { cache:'no-store', mode:'same-origin' });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    KB.raw = await res.json();
+  }catch(e){
+    console.warn('[경고] questions_bank.json 로드 실패. 폴백 사용:', e);
+    KB.raw = FALLBACK_BANK;
+    const msg = document.createElement('div');
+    msg.className = 'q';
+    msg.innerHTML = `<h3>문항 파일을 불러오지 못했습니다.</h3>
+      <div class="hint">같은 폴더의 <code>questions_bank.json</code>을 확인하세요. (임시 폴백 데이터로 진행합니다)</div>`;
+    $('#form').before(msg);
   }
-
-  // 3) 모두 실패 → 폴백으로 진행
-  console.warn('[경고] 모든 경로 로드 실패. 폴백 사용:', lastErr);
-  KB.raw = FALLBACK_BANK;
   KB.bank = filterByAudience(KB.raw, audienceFilter);
-
-  const failMsg = document.createElement('div');
-  failMsg.className = 'q';
-  failMsg.innerHTML = `<h3>문항 파일을 불러오지 못했습니다.</h3>
-  <div class="hint">기대한 위치: <code>${absUrl.replace(origin,'')}</code><br>
-  data/questions_bank.json 경로/대소문자/브랜치/서빙 폴더를 확인하세요. (임시 폴백 데이터로 진행)</div>`;
-  document.querySelector('#form')?.before(failMsg);
 }
 
 function filterByAudience(raw, filter){
   const out = {EI:[], SN:[], TF:[], JP:[]};
   const ok = (aud) => {
-    if(!aud) return true;            // 태그 없으면 포함
+    if(!aud) return true;
     if(aud==='both') return true;
     return aud===filter;
   };
   for(const axis of AXES){
-    for(const q of (raw[axis]||[])){
-      if(ok(q.audience)) out[axis].push(q);
-    }
+    for(const q of (raw[axis]||[])){ if(ok(q.audience)) out[axis].push(q); }
   }
   return out;
 }
 
 // ========== Question pickers ==========
-function shuffleIdx(n){
-  const idx=[...Array(n).keys()];
-  for(let i=n-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [idx[i],idx[j]]=[idx[j],idx[i]]; }
-  return idx;
-}
-function sampleTwo(arr){
-  if(arr.length===1) return [arr[0], arr[0]]; // 방어
-  const idx=shuffleIdx(arr.length);
-  return [arr[idx[0]], arr[idx[1]]];
-}
+function shuffleIdx(n){ const a=[...Array(n).keys()]; for(let i=n-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a; }
+function sampleTwo(arr){ const idx=shuffleIdx(arr.length); return [arr[idx[0]], arr[idx[1]]]; }
+
 function pickBaseQuestions(){
   baseQuestions = []; baseIds = [];
   usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
   AXES.forEach(axis=>{
     const bank=KB.bank?.[axis]||[];
-    if(bank.length<2) {
-      if(bank.length===0) throw new Error(`${axis} 축 문제은행이 비어 있습니다.`);
-      // 최소 방어: 1개만 있으면 중복 출제
-      const [qA,qB]=sampleTwo(bank);
-      const q1={id:`base_${axis}_1`,axis,...qA};
-      const q2={id:`base_${axis}_2`,axis,...qB};
-      baseQuestions.push(q1,q2);
-      baseIds.push(q1.id,q2.id);
-      usedPromptsByAxis[axis].add(qA.prompt); usedPromptsByAxis[axis].add(qB.prompt);
-      return;
-    }
+    if(bank.length<2) throw new Error(`${axis} 축 문제은행이 2개 미만입니다.`);
     const [qA,qB]=sampleTwo(bank);
     const q1={id:`base_${axis}_1`,axis,...qA};
     const q2={id:`base_${axis}_2`,axis,...qB};
@@ -164,7 +96,6 @@ function pickBaseQuestions(){
     baseIds.push(q1.id,q2.id);
     usedPromptsByAxis[axis].add(qA.prompt); usedPromptsByAxis[axis].add(qB.prompt);
   });
-  // 전체 섞기
   for(let i=baseQuestions.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [baseQuestions[i],baseQuestions[j]]=[baseQuestions[j],baseQuestions[i]]; }
 }
 function pickExtraFromBank(axis){
@@ -209,7 +140,6 @@ function collectAnswers(){
     const value = inp.value;
     if(axis && value) answers.push({axis, value});
   });
-  // 필수 표기 (기본 8문항)
   baseIds.forEach(name=>{
     const picked=document.querySelector(`input[name="${name}"]:checked`);
     const req=$('#'+name)?.querySelector('.req');
@@ -223,44 +153,26 @@ function allPendingAnswered(){ return pendingIds.every(id=>isAnswered(id)); }
 function computeMBTI(ans){
   const count={E:0,I:0,S:0,N:0,T:0,F:0,J:0,P:0}, axisTotals={EI:0,SN:0,TF:0,JP:0};
   const poles = { EI:['E','I'], SN:['S','N'], TF:['T','F'], JP:['J','P'] };
-  for (const {axis,value} of ans){
-    if(!axis || !poles[axis]) continue;
-    if(value in count){ count[value]+=1; }
-    axisTotals[axis]++;
-  }
-  const diff = {
-    EI: Math.abs(count.E-count.I),
-    SN: Math.abs(count.S-count.N),
-    TF: Math.abs(count.T-count.F),
-    JP: Math.abs(count.J-count.P)
-  };
+  for (const {axis,value} of ans){ if(!axis||!poles[axis]) continue; if(value in count) count[value]+=1; axisTotals[axis]++; }
+  const diff = { EI:Math.abs(count.E-count.I), SN:Math.abs(count.S-count.N), TF:Math.abs(count.T-count.F), JP:Math.abs(count.J-count.P) };
   const pick=(a,b,def)=> count[a]>count[b]?a:count[a]<count[b]?b:def;
-  const ei=pick('E','I','E'), sn=pick('S','N','S'), tf=pick('T','F','T'), jp=pick('J','P','J');
-  const mbti = ei+sn+tf+jp;
+  const mbti = pick('E','I','E') + pick('S','N','S') + pick('T','F','T') + pick('J','P','J');
   return {mbti,count,axisTotals,diff};
 }
-
 // 규칙: 2문항 diff==0 → +2, 4문항 diff==0 → +2, 6문항 diff==0 → 판정 불가
-function needMoreAfter2(axis, model){ return model.axisTotals[axis]===2 && model.diff[axis] === 0; }
-function needMoreAfter4(axis, model){ return model.axisTotals[axis]===4 && model.diff[axis] === 0; }
-function unresolvedAfter6(axis, model){ return model.axisTotals[axis]===6 && model.diff[axis] === 0; }
+function needMoreAfter2(axis, m){ return m.axisTotals[axis]===2 && m.diff[axis]===0; }
+function needMoreAfter4(axis, m){ return m.axisTotals[axis]===4 && m.diff[axis]===0; }
+function unresolvedAfter6(axis, m){ return m.axisTotals[axis]===6 && m.diff[axis]===0; }
 function hasPendingForAxis(axis){ return pendingIds.some(id=> id.startsWith(`ex_${axis}_`) && !isAnswered(id)); }
 
 function appendExtraFromBank(axis, count=2){
-  let added = 0;
-  while (added < count){
-    const item = pickExtraFromBank(axis);
-    if(!item) break;
+  let added=0;
+  while(added<count){
+    const item=pickExtraFromBank(axis); if(!item) break;
     const id=`ex_${axis}_${Date.now()}_${Math.floor(Math.random()*1e6)}`;
-    const block = makeQuestionBlock({
-      id, axis,
-      prompt:`추가 문항 · ${item.prompt}`,
-      A:item.A, B:item.B, hint:item.hint||'',
-      isExtra:true
-    });
+    const block=makeQuestionBlock({ id, axis, prompt:`추가 문항 · ${item.prompt}`, A:item.A, B:item.B, hint:item.hint||'', isExtra:true });
     $('#form').appendChild(block);
-    pendingIds.push(id);
-    added++;
+    pendingIds.push(id); added++;
   }
   if(added>0){ scrollToEl($('#form').lastElementChild); return true; }
   return false;
@@ -285,33 +197,18 @@ function formatTypeWithUnresolved(model, unresolvedAxes=[]) {
 // 평가
 function evaluateOrAsk(){
   const model = computeMBTI(answers);
+  pendingIds = pendingIds.filter(id=>!isAnswered(id)); // 이미 답한 추가문항 제거
 
-  // 이미 답변한 추가문항 id 정리
-  pendingIds = pendingIds.filter(id=>!isAnswered(id));
+  let added=0;
+  for(const axis of AXES){ if(!baseDone) continue; if(needMoreAfter2(axis,model) && !hasPendingForAxis(axis)){ if(appendExtraFromBank(axis,2)) added++; } }
+  if(added>0) return;
 
-  // (1) 2문항 단계: diff==0 -> 추가 2문항
-  let added = 0;
-  for (const axis of AXES){
-    if(!baseDone) continue;
-    if (needMoreAfter2(axis, model) && !hasPendingForAxis(axis)){
-      if (appendExtraFromBank(axis, 2)) added++;
-    }
-  }
-  if (added>0) return;
+  added=0;
+  for(const axis of AXES){ if(needMoreAfter4(axis,model) && !hasPendingForAxis(axis)){ if(appendExtraFromBank(axis,2)) added++; } }
+  if(added>0) return;
 
-  // (2) 4문항 단계: diff==0 -> 추가 2문항
-  added = 0;
-  for (const axis of AXES){
-    if (needMoreAfter4(axis, model) && !hasPendingForAxis(axis)){
-      if (appendExtraFromBank(axis, 2)) added++;
-    }
-  }
-  if (added>0) return;
+  if(!allPendingAnswered()) return; // 대기중 질문 있으면 보류
 
-  // (3) 아직 대기 중 질문 있으면 결과 보류
-  if (!allPendingAnswered()) return;
-
-  // (4) 최종 판정
   const final = computeMBTI(answers);
   const unresolved = AXES.filter(axis => unresolvedAfter6(axis, final));
   renderResult(final, unresolved);
@@ -373,12 +270,12 @@ P (Perceiving, 인식): 상황에 맞춰 유연하게 적응하며, 열린 선�
 function onAnyChange(){
   collectAnswers();
   if(!baseDone){
-    if(countBaseAnswered() < 8) return; // 기본 8문항 모두 응답되어야 시작
+    if(countBaseAnswered() < 8) return;
     baseDone = true;
     evaluateOrAsk();
     return;
   }
-  evaluateOrAsk(); // 추가 문항 응답 때마다 평가
+  evaluateOrAsk();
 }
 
 function startApp(filter){
@@ -391,12 +288,12 @@ function startApp(filter){
     renderBaseQuestions();
     $('#form').addEventListener('change', onAnyChange, {passive:true});
   }).catch(err=>{
-    console.error('데이터 로드 실패(폴백도 실패):', err);
-    $('#form').innerHTML='<div class="q"><h3>데이터를 불러오지 못했습니다.</h3><div class="hint">data/questions_bank.json 경로와 캐시를 확인하세요.</div></div>';
+    console.error('데이터 로드 실패:', err);
+    $('#form').innerHTML='<div class="q"><h3>데이터를 불러오지 못했습니다.</h3><div class="hint">questions_bank.json 위치/이름을 확인하세요.</div></div>';
   });
 }
 
 document.addEventListener('DOMContentLoaded', ()=>{
   $('#btn-general')?.addEventListener('click', ()=> startApp('general'));
-  $('#btn-senior')?.addEventListener('click',  ()=> startApp('senior'));
+  $('#btn-senior') ?.addEventListener('click', ()=> startApp('senior'));
 });
