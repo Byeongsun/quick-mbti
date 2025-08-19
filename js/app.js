@@ -65,24 +65,54 @@ const FALLBACK_BANK = {
 };
 
 // ========== Load & Filter ==========
-async function loadData(){
-  try{
-    const qRes = await fetch(DATA_URL, {cache:'no-store'});
-    if(!qRes.ok) throw new Error('HTTP '+qRes.status);
-    const raw = await qRes.json();
-    KB.raw = raw;
-  }catch(e){
-    console.warn('[경고] questions_bank.json 로드 실패. 폴백 데이터 사용:', e);
-    // 폴백 사용
-    KB.raw = FALLBACK_BANK;
-    // 화면 안내
-    const msg = document.createElement('div');
-    msg.className = 'q';
-    msg.innerHTML = `<h3>문항 파일을 불러오지 못했습니다.</h3>
-      <div class="hint">data/questions_bank.json 경로/대소문자/위치를 확인해주세요. (임시 폴백 데이터로 진행합니다)</div>`;
-    $('#form').before(msg);
+async function loadData() {
+  // 1) 현재 페이지의 "리포지토리 루트"를 계산 (예: https://byeongsun.github.io/quick-mbti/)
+  const { origin, pathname } = location;
+  // pathname이 /quick-mbti/ 또는 /quick-mbti/index.html 같은 형태일 때 리포 루트 산출
+  const seg = pathname.split('/').filter(Boolean); // ["quick-mbti", "index.html"] 등
+  const repoRoot = seg.length ? `/${seg[0]}/` : '/'; // /quick-mbti/ 또는 /
+  const absUrl = `${origin}${repoRoot}data/questions_bank.json?ts=${Date.now()}`;
+
+  // 2) 후보 URL 순차 시도: (a) 정확 절대경로, (b) 상대경로(동일폴더), (c) docs 하위 가능성
+  const CANDIDATES = [
+    absUrl,
+    `./data/questions_bank.json?ts=${Date.now()}`,
+    `data/questions_bank.json?ts=${Date.now()}`,
+    `${origin}${repoRoot}docs/data/questions_bank.json?ts=${Date.now()}`
+  ];
+
+  let lastErr = null;
+  for (const url of CANDIDATES) {
+    try {
+      console.log('[questions] try:', url);
+      const res = await fetch(url, { cache: 'no-store', mode: 'same-origin' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      KB.raw = await res.json();
+      KB.bank = filterByAudience(KB.raw, audienceFilter);
+
+      // 화면에 성공 경로를 안내(한 번만)
+      const okMsg = document.createElement('div');
+      okMsg.className = 'q';
+      okMsg.innerHTML = `<div class="hint">문항 파일 로드됨: <code>${url.replace(origin,'')}</code></div>`;
+      document.querySelector('#form')?.before(okMsg);
+      return;
+    } catch (e) {
+      console.warn('[questions] fail:', url, e);
+      lastErr = e;
+    }
   }
+
+  // 3) 모두 실패 → 폴백으로 진행
+  console.warn('[경고] 모든 경로 로드 실패. 폴백 사용:', lastErr);
+  KB.raw = FALLBACK_BANK;
   KB.bank = filterByAudience(KB.raw, audienceFilter);
+
+  const failMsg = document.createElement('div');
+  failMsg.className = 'q';
+  failMsg.innerHTML = `<h3>문항 파일을 불러오지 못했습니다.</h3>
+  <div class="hint">기대한 위치: <code>${absUrl.replace(origin,'')}</code><br>
+  data/questions_bank.json 경로/대소문자/브랜치/서빙 폴더를 확인하세요. (임시 폴백 데이터로 진행)</div>`;
+  document.querySelector('#form')?.before(failMsg);
 }
 
 function filterByAudience(raw, filter){
