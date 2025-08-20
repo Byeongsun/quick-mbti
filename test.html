@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>JSON Load Test</title>
+</head>
+<body>
+  <h1>JSON Load Test</h1>
+  <pre id="output">결과 대기중...</pre>
+
+  <script>
+    const OUT = document.getElementById("output");
+
+    // 같은 폴더에 있는 questions_bank.json 시도
+    fetch("./questions_bank.json")
+      .then(res => {
+        OUT.textContent = "HTTP 상태: " + res.status;
+        if (!res.ok) throw new Error("응답 오류: " + res.status);
+        return res.json();
+      })
+      .then(data => {
+        OUT.textContent += "\n\n데이터 예시:\n" + JSON.stringify(data, null, 2).slice(0, 500) + " ...";
+      })
+      .catch(err => {
+        OUT.textContent += "\n\n에러 발생:\n" + err;
+      });
+  </script>
+</body>
+</html>
