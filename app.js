@@ -245,6 +245,9 @@ function renderResult(model, unresolvedAxes=[]){
   ensureReportStyles();
   const form=$('#form'); if(form) form.innerHTML='';
 
+  // 🔥 응답 최신화 강제 (추가!)
+  collectAnswers();
+
   const displayType = formatTypeWithUnresolved(model, unresolvedAxes);
   const unresolvedNote = unresolvedAxes.length ? `\n[참고] 일부 축은 판정 불가(혼재): ${unresolvedAxes.join(', ')}` : '';
   const logText = buildAnswerLog(answers);
