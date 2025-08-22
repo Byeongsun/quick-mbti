@@ -1,5 +1,5 @@
 // ========== Config ==========
-const VER = '2025-08-19';
+const VER = '2025-08-19-dbglog';
 const AXES = ['EI','SN','TF','JP'];
 // 같은 폴더에 있는 통합 문항은행
 const DATA_URL = `./questions_bank.json?ts=${Date.now()}`;
@@ -16,9 +16,11 @@ let KB = { raw:null, bank:null };
 let baseQuestions = []; // 8개(각 축 2개)
 let baseIds = [];
 let usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
-let answers = [];       // {axis, value}  value∈ E/I/S/N/T/F/J/P
+let answers = [];       // {id, axis, value, label, prompt, isExtra}
 let baseDone = false;
 let pendingIds = [];
+// (NEW) 렌더된 질문 메타(결과 로그 위해 유지)
+let questionMeta = {};  // id -> {axis,prompt,A,B,isExtra}
 
 // (옵션) 폴백 샘플 — JSON을 못 읽을 때 최소 동작 보장
 const FALLBACK_BANK = {
@@ -86,6 +88,7 @@ function sampleTwo(arr){ const idx=shuffleIdx(arr.length); return [arr[idx[0]], 
 function pickBaseQuestions(){
   baseQuestions = []; baseIds = [];
   usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
+  questionMeta = {};
   AXES.forEach(axis=>{
     const bank=KB.bank?.[axis]||[];
     if(bank.length<2) throw new Error(`${axis} 축 문제은행이 2개 미만입니다.`);
@@ -121,6 +124,8 @@ function makeQuestionBlock({id,axis,prompt,A,B,hint,isExtra=false,indexNum=null}
     <div class="req">이 문항에 답해주세요.</div>
     ${hint?`<div class="hint">${hint}${isExtra?' · (추가 질문)':''}</div>`:(isExtra?`<div class="hint">(추가 질문)</div>`:'')}
   `;
+  // (NEW) 메타 저장 — 결과 로그에 사용
+  questionMeta[id] = { axis, prompt, A, B, isExtra };
   div.querySelectorAll('input[type="radio"]').forEach(r=>r.addEventListener('change', onAnyChange, {passive:true}));
   return div;
 }
@@ -136,9 +141,21 @@ function renderBaseQuestions(){
 function collectAnswers(){
   answers = [];
   document.querySelectorAll('input[type="radio"]:checked').forEach(inp=>{
-    const axis = inp.closest('.q')?.dataset?.axes;
+    const id = inp.name;
+    const qDiv = inp.closest('.q');
+    const axis = qDiv?.dataset?.axes || questionMeta[id]?.axis;
     const value = inp.value;
-    if(axis && value) answers.push({axis, value});
+
+    const meta = questionMeta[id] || {};
+    const label =
+      (meta.A && meta.A.value === value ? meta.A.label :
+       meta.B && meta.B.value === value ? meta.B.label : '');
+    const prompt = meta.prompt || qDiv?.querySelector('h3')?.textContent || '';
+    const isExtra = !!meta.isExtra;
+
+    if(axis && value){
+      answers.push({id, axis, value, label, prompt, isExtra});
+    }
   });
   baseIds.forEach(name=>{
     const picked=document.querySelector(`input[name="${name}"]:checked`);
@@ -153,7 +170,12 @@ function allPendingAnswered(){ return pendingIds.every(id=>isAnswered(id)); }
 function computeMBTI(ans){
   const count={E:0,I:0,S:0,N:0,T:0,F:0,J:0,P:0}, axisTotals={EI:0,SN:0,TF:0,JP:0};
   const poles = { EI:['E','I'], SN:['S','N'], TF:['T','F'], JP:['J','P'] };
-  for (const {axis,value} of ans){ if(!axis||!poles[axis]) continue; if(value in count) count[value]+=1; axisTotals[axis]++; }
+  for (const a of ans){
+    const {axis,value} = a;
+    if(!axis || !poles[axis]) continue;
+    if(value in count){ count[value]+=1; }
+    axisTotals[axis]++;
+  }
   const diff = { EI:Math.abs(count.E-count.I), SN:Math.abs(count.S-count.N), TF:Math.abs(count.T-count.F), JP:Math.abs(count.J-count.P) };
   const pick=(a,b,def)=> count[a]>count[b]?a:count[a]<count[b]?b:def;
   const mbti = pick('E','I','E') + pick('S','N','S') + pick('T','F','T') + pick('J','P','J');
@@ -194,6 +216,17 @@ function formatTypeWithUnresolved(model, unresolvedAxes=[]) {
   }).join('');
 }
 
+// (NEW) 응답 로그 텍스트 만들기
+function buildAnswerLog(ansList){
+  if(!ansList || ansList.length===0) return '(응답 없음)';
+  // 표시 순서: 기본8 → 추가문항(나중) (현재 answers는 DOM 순회 순서라 거의 시간순)
+  return ansList.map((a,i)=>{
+    const kind = a.isExtra ? '(추가) ' : '';
+    const safePrompt = (a.prompt || '').replace(/^추가 문항 ·\s*/,'');
+    return `${i+1}) [${a.axis}] ${kind}${safePrompt}\n    → 선택: ${a.label} (${a.value})`;
+  }).join('\n');
+}
+
 // 평가
 function evaluateOrAsk(){
   const model = computeMBTI(answers);
@@ -211,7 +244,8 @@ function evaluateOrAsk(){
 
   const final = computeMBTI(answers);
   const unresolved = AXES.filter(axis => unresolvedAfter6(axis, final));
-  renderResult(final, unresolved);
+  // (NEW) 현재 answers 스냅샷을 함께 넘김
+  renderResult(final, unresolved, answers.slice());
 }
 
 // 결과 화면
@@ -231,12 +265,13 @@ function ensureReportStyles(){
   `;
   document.head.appendChild(css);
 }
-function renderResult(model, unresolvedAxes=[]){
+function renderResult(model, unresolvedAxes=[], answerLogList=[]){
   ensureReportStyles();
   const form=$('#form'); if(form) form.innerHTML='';
 
   const displayType = formatTypeWithUnresolved(model, unresolvedAxes);
   const unresolvedNote = unresolvedAxes.length ? `\n[참고] 일부 축은 판정 불가(혼재): ${unresolvedAxes.join(', ')}` : '';
+  const logText = buildAnswerLog(answerLogList);
 
   $('#result').innerHTML = `
 <pre>
@@ -261,6 +296,9 @@ F (Feeling, 감정): 사람·가치·관계의 조화를 중시하고, 공감과
 
 J (Judging, 판단): 계획적·체계적으로 일을 정리하고, 마감과 규칙을 선호함
 P (Perceiving, 인식): 상황에 맞춰 유연하게 적응하며, 열린 선택지를 유지하는 것을 선호함
+
+[응답 로그]
+${logText}
 </pre>`;
   $('#result').style.display='block';
   scrollToEl($('#result'));
@@ -283,7 +321,7 @@ function startApp(filter){
   $('#mode-select').style.display = 'none';
   $('#form').style.display = 'block';
   loadData().then(()=>{
-    answers=[]; baseDone=false; pendingIds=[];
+    answers=[]; baseDone=false; pendingIds=[]; questionMeta={};
     $('#result').innerHTML='';
     renderBaseQuestions();
     $('#form').addEventListener('change', onAnyChange, {passive:true});
