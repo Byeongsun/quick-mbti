@@ -1,7 +1,6 @@
 // ========== Config ==========
-const VER = '2025-08-19-dbglog';
+const VER = '2025-08-20-logs';
 const AXES = ['EI','SN','TF','JP'];
-// 같은 폴더에 있는 통합 문항은행
 const DATA_URL = `./questions_bank.json?ts=${Date.now()}`;
 
 // 출제 범위: 'general' | 'senior'
@@ -19,10 +18,9 @@ let usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
 let answers = [];       // {id, axis, value, label, prompt, isExtra}
 let baseDone = false;
 let pendingIds = [];
-// (NEW) 렌더된 질문 메타(결과 로그 위해 유지)
 let questionMeta = {};  // id -> {axis,prompt,A,B,isExtra}
 
-// (옵션) 폴백 샘플 — JSON을 못 읽을 때 최소 동작 보장
+// ========== 폴백(간단 샘플) ==========
 const FALLBACK_BANK = {
   EI: [
     { audience:'general', prompt:'가족 단톡방에서 즉흥적으로 주말 피크닉 제안이 나왔습니다.',
@@ -67,36 +65,25 @@ async function loadData(){
   }
   KB.bank = filterByAudience(KB.raw, audienceFilter);
 }
-
 function filterByAudience(raw, filter){
   const out = {EI:[], SN:[], TF:[], JP:[]};
-  const ok = (aud) => {
-    if(!aud) return true;
-    if(aud==='both') return true;
-    return aud===filter;
-  };
-  for(const axis of AXES){
-    for(const q of (raw[axis]||[])){ if(ok(q.audience)) out[axis].push(q); }
-  }
+  const ok = (aud) => !aud || aud==='both' || aud===filter;
+  for(const axis of AXES){ for(const q of (raw[axis]||[])){ if(ok(q.audience)) out[axis].push(q); } }
   return out;
 }
 
 // ========== Question pickers ==========
 function shuffleIdx(n){ const a=[...Array(n).keys()]; for(let i=n-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a; }
 function sampleTwo(arr){ const idx=shuffleIdx(arr.length); return [arr[idx[0]], arr[idx[1]]]; }
-
 function pickBaseQuestions(){
-  baseQuestions = []; baseIds = [];
-  usedPromptsByAxis = {EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()};
-  questionMeta = {};
+  baseQuestions=[]; baseIds=[]; usedPromptsByAxis={EI:new Set(),SN:new Set(),TF:new Set(),JP:new Set()}; questionMeta={};
   AXES.forEach(axis=>{
     const bank=KB.bank?.[axis]||[];
     if(bank.length<2) throw new Error(`${axis} 축 문제은행이 2개 미만입니다.`);
     const [qA,qB]=sampleTwo(bank);
     const q1={id:`base_${axis}_1`,axis,...qA};
     const q2={id:`base_${axis}_2`,axis,...qB};
-    baseQuestions.push(q1,q2);
-    baseIds.push(q1.id,q2.id);
+    baseQuestions.push(q1,q2); baseIds.push(q1.id,q2.id);
     usedPromptsByAxis[axis].add(qA.prompt); usedPromptsByAxis[axis].add(qB.prompt);
   });
   for(let i=baseQuestions.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [baseQuestions[i],baseQuestions[j]]=[baseQuestions[j],baseQuestions[i]]; }
@@ -124,7 +111,7 @@ function makeQuestionBlock({id,axis,prompt,A,B,hint,isExtra=false,indexNum=null}
     <div class="req">이 문항에 답해주세요.</div>
     ${hint?`<div class="hint">${hint}${isExtra?' · (추가 질문)':''}</div>`:(isExtra?`<div class="hint">(추가 질문)</div>`:'')}
   `;
-  // (NEW) 메타 저장 — 결과 로그에 사용
+  // 결과 로그용 메타 저장
   questionMeta[id] = { axis, prompt, A, B, isExtra };
   div.querySelectorAll('input[type="radio"]').forEach(r=>r.addEventListener('change', onAnyChange, {passive:true}));
   return div;
@@ -142,20 +129,15 @@ function collectAnswers(){
   answers = [];
   document.querySelectorAll('input[type="radio"]:checked').forEach(inp=>{
     const id = inp.name;
-    const qDiv = inp.closest('.q');
-    const axis = qDiv?.dataset?.axes || questionMeta[id]?.axis;
-    const value = inp.value;
-
     const meta = questionMeta[id] || {};
-    const label =
-      (meta.A && meta.A.value === value ? meta.A.label :
-       meta.B && meta.B.value === value ? meta.B.label : '');
-    const prompt = meta.prompt || qDiv?.querySelector('h3')?.textContent || '';
+    const axis = meta.axis || inp.closest('.q')?.dataset?.axes;
+    const value = inp.value;
+    let label = '';
+    if(meta.A && meta.A.value===value) label = meta.A.label;
+    else if(meta.B && meta.B.value===value) label = meta.B.label;
+    const prompt = meta.prompt || '';
     const isExtra = !!meta.isExtra;
-
-    if(axis && value){
-      answers.push({id, axis, value, label, prompt, isExtra});
-    }
+    if(axis && value){ answers.push({id, axis, value, label, prompt, isExtra}); }
   });
   baseIds.forEach(name=>{
     const picked=document.querySelector(`input[name="${name}"]:checked`);
@@ -170,18 +152,12 @@ function allPendingAnswered(){ return pendingIds.every(id=>isAnswered(id)); }
 function computeMBTI(ans){
   const count={E:0,I:0,S:0,N:0,T:0,F:0,J:0,P:0}, axisTotals={EI:0,SN:0,TF:0,JP:0};
   const poles = { EI:['E','I'], SN:['S','N'], TF:['T','F'], JP:['J','P'] };
-  for (const a of ans){
-    const {axis,value} = a;
-    if(!axis || !poles[axis]) continue;
-    if(value in count){ count[value]+=1; }
-    axisTotals[axis]++;
-  }
+  for (const a of ans){ const {axis,value}=a; if(!axis||!poles[axis]) continue; if(value in count) count[value]+=1; axisTotals[axis]++; }
   const diff = { EI:Math.abs(count.E-count.I), SN:Math.abs(count.S-count.N), TF:Math.abs(count.T-count.F), JP:Math.abs(count.J-count.P) };
   const pick=(a,b,def)=> count[a]>count[b]?a:count[a]<count[b]?b:def;
   const mbti = pick('E','I','E') + pick('S','N','S') + pick('T','F','T') + pick('J','P','J');
   return {mbti,count,axisTotals,diff};
 }
-// 규칙: 2문항 diff==0 → +2, 4문항 diff==0 → +2, 6문항 diff==0 → 판정 불가
 function needMoreAfter2(axis, m){ return m.axisTotals[axis]===2 && m.diff[axis]===0; }
 function needMoreAfter4(axis, m){ return m.axisTotals[axis]===4 && m.diff[axis]===0; }
 function unresolvedAfter6(axis, m){ return m.axisTotals[axis]===6 && m.diff[axis]===0; }
@@ -216,21 +192,22 @@ function formatTypeWithUnresolved(model, unresolvedAxes=[]) {
   }).join('');
 }
 
-// (NEW) 응답 로그 텍스트 만들기
-function buildAnswerLog(ansList){
-  if(!ansList || ansList.length===0) return '(응답 없음)';
-  // 표시 순서: 기본8 → 추가문항(나중) (현재 answers는 DOM 순회 순서라 거의 시간순)
-  return ansList.map((a,i)=>{
+// === NEW: 응답 로그 생성 ===
+function buildAnswerLog(list){
+  const src = (list && list.length) ? list : answers;     // 스냅샷이 비면 전역 answers 사용
+  if(!src || src.length===0) return '(응답 없음)';
+  return src.map((a,i)=>{
     const kind = a.isExtra ? '(추가) ' : '';
-    const safePrompt = (a.prompt || '').replace(/^추가 문항 ·\s*/,'');
-    return `${i+1}) [${a.axis}] ${kind}${safePrompt}\n    → 선택: ${a.label} (${a.value})`;
+    const prompt = (a.prompt||'').replace(/^추가 문항 ·\s*/,'');
+    const label  = a.label || (questionMeta[a.id]?.[ a.value==='E'||a.value==='S'||a.value==='T'||a.value==='J' ? 'A':'B' ]?.label) || '';
+    return `${i+1}) [${a.axis}] ${kind}${prompt}\n    → 선택: ${label} (${a.value})`;
   }).join('\n');
 }
 
 // 평가
 function evaluateOrAsk(){
   const model = computeMBTI(answers);
-  pendingIds = pendingIds.filter(id=>!isAnswered(id)); // 이미 답한 추가문항 제거
+  pendingIds = pendingIds.filter(id=>!isAnswered(id));
 
   let added=0;
   for(const axis of AXES){ if(!baseDone) continue; if(needMoreAfter2(axis,model) && !hasPendingForAxis(axis)){ if(appendExtraFromBank(axis,2)) added++; } }
@@ -240,12 +217,11 @@ function evaluateOrAsk(){
   for(const axis of AXES){ if(needMoreAfter4(axis,model) && !hasPendingForAxis(axis)){ if(appendExtraFromBank(axis,2)) added++; } }
   if(added>0) return;
 
-  if(!allPendingAnswered()) return; // 대기중 질문 있으면 보류
+  if(!allPendingAnswered()) return;
 
   const final = computeMBTI(answers);
   const unresolved = AXES.filter(axis => unresolvedAfter6(axis, final));
-  // (NEW) 현재 answers 스냅샷을 함께 넘김
-  renderResult(final, unresolved, answers.slice());
+  renderResult(final, unresolved);     // (스냅샷 인자 제거 → 전역 answers 사용)
 }
 
 // 결과 화면
@@ -265,13 +241,13 @@ function ensureReportStyles(){
   `;
   document.head.appendChild(css);
 }
-function renderResult(model, unresolvedAxes=[], answerLogList=[]){
+function renderResult(model, unresolvedAxes=[]){
   ensureReportStyles();
   const form=$('#form'); if(form) form.innerHTML='';
 
   const displayType = formatTypeWithUnresolved(model, unresolvedAxes);
   const unresolvedNote = unresolvedAxes.length ? `\n[참고] 일부 축은 판정 불가(혼재): ${unresolvedAxes.join(', ')}` : '';
-  const logText = buildAnswerLog(answerLogList);
+  const logText = buildAnswerLog(answers);
 
   $('#result').innerHTML = `
 <pre>
@@ -315,9 +291,8 @@ function onAnyChange(){
   }
   evaluateOrAsk();
 }
-
 function startApp(filter){
-  audienceFilter = filter; // 'general' | 'senior'
+  audienceFilter = filter;
   $('#mode-select').style.display = 'none';
   $('#form').style.display = 'block';
   loadData().then(()=>{
@@ -330,7 +305,6 @@ function startApp(filter){
     $('#form').innerHTML='<div class="q"><h3>데이터를 불러오지 못했습니다.</h3><div class="hint">questions_bank.json 위치/이름을 확인하세요.</div></div>';
   });
 }
-
 document.addEventListener('DOMContentLoaded', ()=>{
   $('#btn-general')?.addEventListener('click', ()=> startApp('general'));
   $('#btn-senior') ?.addEventListener('click', ()=> startApp('senior'));
