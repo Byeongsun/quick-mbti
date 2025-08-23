@@ -241,15 +241,23 @@ function ensureReportStyles(){
   `;
   document.head.appendChild(css);
 }
-function renderResult(model, unresolvedAxes=[]){
-  ensureReportStyles();
-  const form=$('#form'); if(form) form.innerHTML='';
 
-  // 🔥 응답 최신화 강제 (추가!)
+function renderResult(model, unresolvedAxes = []) {
+  ensureReportStyles();
+
+  // ✅ 1) 먼저 최신 응답을 수집
   collectAnswers();
 
+  // ⬇️ 이 이후에 폼을 비웁니다.
+  const form = $('#form');
+  if (form) form.innerHTML = '';
+
   const displayType = formatTypeWithUnresolved(model, unresolvedAxes);
-  const unresolvedNote = unresolvedAxes.length ? `\n[참고] 일부 축은 판정 불가(혼재): ${unresolvedAxes.join(', ')}` : '';
+  const unresolvedNote = unresolvedAxes.length
+    ? `\n[참고] 일부 축은 판정 불가(혼재): ${unresolvedAxes.join(', ')}`
+    : '';
+
+  // 전역 answers를 사용해 로그 생성
   const logText = buildAnswerLog(answers);
 
   $('#result').innerHTML = `
@@ -279,7 +287,7 @@ P (Perceiving, 인식): 상황에 맞춰 유연하게 적응하며, 열린 선�
 [응답 로그]
 ${logText}
 </pre>`;
-  $('#result').style.display='block';
+  $('#result').style.display = 'block';
   scrollToEl($('#result'));
 }
 
