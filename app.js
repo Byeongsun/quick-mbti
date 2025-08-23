@@ -283,6 +283,7 @@ ${logText}
   scrollToEl($('#result'));
 }
 
+
 // 부트스트랩
 function onAnyChange(){
   collectAnswers();
